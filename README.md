@@ -33,7 +33,7 @@ npm run db:seed
 npm run dev
 ```
 
-Buka port 5173 pada mesin yang menjalankan aplikasi. Buat akun pendamping, tambahkan nama panggilan anak, lalu pilih kategori, level, bahasa latihan, mode, dan jumlah kartu. Periksa susunan sesi sebelum mulai. Untuk mode pendamping, tekan **Mulai membacakan**; tidak memerlukan key Gemini atau mikrofon. Kedua mode tetap membutuhkan internet pada pilot. Nama pendamping, teman, hewan peliharaan, dan usia boleh kosong.
+Buka port 5173 pada mesin yang menjalankan aplikasi. Buat akun pendamping, tambahkan nama panggilan anak, lalu pilih **Pendamping** atau **Gemini Live** dan tekan **Mulai sesi**. Default tiga kartu Mendengar level 1 dalam Indonesia; jumlah pertanyaan dihitung otomatis. Kategori, level, bahasa, jumlah, dan pemilihan kartu tersedia di **Ubah pengaturan**, tanpa langkah periksa manual. Peringatan kartu lama tetap ditampilkan sebelum mulai. Untuk mode pendamping, tekan **Mulai membacakan**; tidak memerlukan key Gemini atau mikrofon. Kedua mode tetap membutuhkan internet pada pilot. Nama pendamping, teman, hewan peliharaan, dan usia boleh kosong.
 
 Seed dapat dijalankan ulang: ID stabil dan menggunakan upsert. Pilot: dua kategori × dua level × lima kartu, dengan versi bahasa berpasangan. Koleksi lama: 100 Mendengar dan 100 Logika, masing-masing 20 soal per level 1–5. Sesi pilot menyimpan snapshot kartu sehingga perubahan seed tidak mengubah cerita sesi yang sudah dimulai. Migration baru menambah tabel tanpa menghapus data lama. Tidak ada akun bawaan atau hasil belajar contoh.
 

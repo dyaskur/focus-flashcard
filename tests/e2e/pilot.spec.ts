@@ -28,11 +28,11 @@ test('bilingual caregiver practice preserves attempts through pause, correction,
   page.on('pageerror', (e) => errors.push(e.message));
   await register(page);
   await expect(page.getByRole('heading', { name: 'Cerita kecil, banyak penemuan.' })).toBeVisible();
+  await page.getByText('Ubah pengaturan', { exact: true }).click();
   await page.getByLabel('Bahasa latihan anak').selectOption('en');
   await page.getByRole('button', { name: '1 kartu', exact: true }).click();
-  await page.getByRole('button', { name: 'Periksa susunan sesi' }).click();
   await expect(page.getByText('1 kartu · 2 pertanyaan')).toBeVisible();
-  await snapshot(page, 'pilot-setup-desktop');
+  await snapshot(page, 'pilot-simple-settings-desktop');
   await page.getByRole('button', { name: /^Mulai sesi/ }).click();
   await expect(page).toHaveURL(/\/latihan\//);
   const id = page.url().split('/').pop()!;
@@ -110,8 +110,17 @@ test('manual practice never requests a microphone and unseen shortage is warned 
     });
   });
   await page.reload();
+  await expect(page.getByLabel('Bahasa latihan anak')).not.toBeVisible();
+  await expect(page.getByText('3 kartu · 6 pertanyaan')).toBeVisible();
+  await snapshot(page, 'pilot-simple-start-desktop');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await snapshot(page, 'pilot-simple-start-mobile');
+  await page.getByText('Ubah pengaturan', { exact: true }).click();
+  await page.getByLabel('Jumlah kartu', { exact: true }).fill('0');
+  await expect(page.getByRole('button', { name: /^Mulai sesi/ })).toBeDisabled();
   await page.getByRole('button', { name: '5 kartu', exact: true }).click();
-  await page.getByRole('button', { name: 'Periksa susunan sesi' }).click();
+  await expect(page.getByText('5 kartu · 10 pertanyaan')).toBeVisible();
+  await snapshot(page, 'pilot-simple-settings-mobile');
   await page.getByRole('button', { name: /^Mulai sesi/ }).click();
   await page.getByRole('button', { name: 'Mulai membacakan' }).click();
   const id = page.url().split('/').pop()!;
@@ -134,12 +143,11 @@ test('manual practice never requests a microphone and unseen shortage is warned 
     saved.attempts.every((a: { responseTimeMs: number | null }) => a.responseTimeMs === null)
   ).toBe(true);
   await page.goto('/beranda');
-  await page.getByRole('button', { name: 'Periksa susunan sesi' }).click();
   await expect(
     page.getByText('0 belum pernah tuntas + 3 pernah dilatih dalam bahasa ini.')
   ).toBeVisible();
   await expect(page.getByText('Kartu baru tidak cukup.', { exact: false })).toBeVisible();
-  await snapshot(page, 'pilot-unseen-warning');
+  await snapshot(page, 'pilot-simple-warning-mobile');
   await page.getByRole('button', { name: /^Mulai sesi/ }).click();
   await expect(page.getByRole('button', { name: 'Mulai membacakan' })).toBeVisible();
 });
@@ -149,9 +157,7 @@ test('silence gives two invitations and a skip offer, then pauses without a wron
 }) => {
   await register(page);
   await page.clock.install();
-  await page.getByRole('combobox', { name: 'Mode latihan', exact: true }).selectOption('ai');
-  await page.getByRole('button', { name: '1 kartu', exact: true }).click();
-  await page.getByRole('button', { name: 'Periksa susunan sesi' }).click();
+  await page.getByRole('radio', { name: /Gemini Live/ }).check();
   await page.getByRole('button', { name: /^Mulai sesi/ }).click();
   await page.getByLabel('Saya mendampingi dan mengizinkan pemrosesan suara oleh Gemini.').check();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
@@ -169,6 +175,8 @@ test('silence gives two invitations and a skip offer, then pauses without a wron
   await page.clock.runFor(7000);
   await expect(page.getByRole('heading', { name: 'Latihan dijeda.' })).toBeVisible();
   const saved = await (await page.request.get(`/api/pilot/${page.url().split('/').pop()}`)).json();
+  expect(saved.mode).toBe('ai');
+  expect(saved.cards).toHaveLength(3);
   expect(saved.attempts).toEqual([]);
   expect(saved.events.filter((e: { type: string }) => e.type === 'hint')).toHaveLength(1);
   expect(saved.status).toBe('paused');

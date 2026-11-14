@@ -27,12 +27,13 @@
     count,
     selection
   });
+  const validCount = $derived(Number.isInteger(count) && count >= 1 && count <= available.length);
   $effect(() => {
     void settings;
     composition = null;
+    if (settings.childId && validCount) void preview();
   });
   async function preview() {
-    busy = true;
     message = '';
     const requested = JSON.stringify(settings);
     try {
@@ -42,9 +43,7 @@
       );
       if (requested === JSON.stringify(settings)) composition = result;
     } catch (e) {
-      message = (e as Error).message;
-    } finally {
-      busy = false;
+      if (requested === JSON.stringify(settings)) message = (e as Error).message;
     }
   }
   async function start() {
@@ -82,132 +81,133 @@
   </div>
   <div class="pilot-home-grid">
     <section class="form-card">
-      <h2>{t('Atur latihan', 'Plan a practice')}</h2>
-      <p class="muted">
-        {t(
-          'Satu cerita, 2–4 pertanyaan berurutan. Tidak ada kartu ganda dalam sesi.',
-          'One story, 2–4 questions in sequence. No duplicate cards in a session.'
-        )}
-      </p>
-      <div class="form-grid mt-5">
-        <label
-          >{t('Kategori', 'Category')}<select bind:value={category}
-            ><option value="mendengar">{t('Mendengar', 'Listening')}</option><option value="logika"
-              >{t('Logika', 'Reasoning')}</option
-            ></select
-          ></label
-        >
-        <label
-          >{t('Level', 'Level')}<select bind:value={level}
-            ><option value={1}>1 · {t('Mulai mengenal', 'Getting started')}</option><option
-              value={2}>2 · {t('Mulai terbiasa', 'Growing familiar')}</option
-            ></select
-          ></label
-        >
-        <label
-          >{t('Bahasa latihan anak', 'Child’s exercise language')}<select bind:value={language}
-            ><option value="id">Indonesia</option><option value="en">English</option></select
-          ></label
-        >
-        <label
-          >{t('Mode latihan', 'Practice mode')}<select bind:value={mode}
-            ><option value="manual"
-              >{t('Pendamping · tanpa mikrofon', 'Caregiver · no microphone')}</option
-            ><option value="ai">AI · Gemini Live</option></select
-          ></label
-        >
-      </div>
-      <label
-        >{t('Pemilihan kartu', 'Card selection')}<select bind:value={selection}
-          ><option value="new"
-            >{t('Belum pernah tuntas · bahasa ini', 'Not completed before · this language')}</option
-          ><option value="random"
-            >{t(
-              'Acak semua · termasuk kartu lama',
-              'Pure random · includes practiced cards'
-            )}</option
-          ></select
-        ></label
-      >
-      <label
-        >{t('Jumlah kartu', 'Number of cards')}<input
-          aria-label={t('Jumlah kartu', 'Number of cards')}
-          type="number"
-          min="1"
-          max={available.length}
-          step="1"
-          bind:value={count}
-        /></label
-      >
-      <div class="pilot-actions">
-        {#each [1, 3, 5] as n}<button
-            class="button ghost"
-            class:chosen={count === n}
-            onclick={() => (count = n)}>{n} {t('kartu', 'cards')}</button
-          >{/each}
-      </div>
-      <p class="fine-print">
-        {available.length}
-        {t(
-          'kartu tersedia untuk filter ini. Default 3; bukan perkiraan durasi.',
-          'cards available for these filters. Three recommended; no fixed duration.'
-        )}
-      </p>
-      {#if composition}<div class="pilot-notice" role="status">
-          <strong
-            >{composition.count}
-            {t('kartu', 'cards')} · {composition.questionCount}
-            {t('pertanyaan', 'questions')}</strong
+      <fieldset class="pilot-mode-choice" disabled={busy}>
+        <legend>{t('Siapa yang membacakan?', 'Who reads the story?')}</legend>
+        <label class:chosen={mode === 'manual'}>
+          <input type="radio" name="practice-mode" value="manual" bind:group={mode} />
+          <span
+            ><strong>{t('Pendamping', 'Caregiver')}</strong><small
+              >{t('Tanpa mikrofon', 'No microphone')}</small
+            ></span
           >
+        </label>
+        <label class:chosen={mode === 'ai'}>
+          <input type="radio" name="practice-mode" value="ai" bind:group={mode} />
+          <span
+            ><strong>Gemini Live</strong><small>{t('Bicara dengan AI', 'Talk with AI')}</small
+            ></span
+          >
+        </label>
+      </fieldset>
+      <div class="pilot-start-summary" role="status">
+        <strong
+          >{composition
+            ? `${composition.count} ${t('kartu', 'cards')} · ${composition.questionCount} ${t('pertanyaan', 'questions')}`
+            : validCount
+              ? t('Menyiapkan kartu…', 'Preparing cards…')
+              : t('Periksa jumlah kartu.', 'Check the card count.')}</strong
+        >
+        <p>
+          {category === 'mendengar' ? t('Mendengar', 'Listening') : t('Logika', 'Reasoning')} · Level
+          {level} · {language === 'id' ? 'Indonesia' : 'English'}
+        </p>
+      </div>
+      {#if composition && selection === 'new' && composition.oldCount}<div
+          class="pilot-notice"
+          role="status"
+        >
           <p>
             {composition.count - composition.oldCount}
             {t('belum pernah tuntas', 'not completed before')} + {composition.oldCount}
             {t('pernah dilatih dalam bahasa ini', 'previously practiced in this language')}.
           </p>
-          {#if selection === 'new' && composition.oldCount}<p>
-              {t(
-                'Kartu baru tidak cukup. Sisanya memakai kartu yang paling lama tidak dilatih. Lanjutkan atau ubah jumlah.',
-                'Not enough unseen cards. The rest are the least recently practiced. Continue or change the count.'
-              )}
-            </p>{/if}<button class="button primary mt-4" disabled={busy} onclick={start}
-            >{t('Mulai sesi', 'Start session')} →</button
+          <p>
+            {t(
+              'Kartu baru tidak cukup. Sisanya memakai kartu yang paling lama tidak dilatih. Lanjutkan atau ubah jumlah.',
+              'Not enough unseen cards. The rest are the least recently practiced. Continue or change the count.'
+            )}
+          </p>
+        </div>{/if}
+      <button class="button primary full mt-5" disabled={busy || !composition} onclick={start}
+        >{busy ? t('Memulai…', 'Starting…') : t('Mulai sesi', 'Start session')} →</button
+      >
+      {#if message}<p class="error-text" role="alert">
+          {message}
+          <button class="text-toggle" onclick={preview}>{t('Coba lagi', 'Try again')}</button>
+        </p>{/if}
+      <details class="pilot-setup-options">
+        <summary>{t('Ubah pengaturan', 'Change settings')}</summary>
+        <fieldset disabled={busy}>
+          <div class="form-grid mt-5">
+            <label
+              >{t('Kategori', 'Category')}<select bind:value={category}>
+                <option value="mendengar">{t('Mendengar', 'Listening')}</option><option
+                  value="logika">{t('Logika', 'Reasoning')}</option
+                >
+              </select></label
+            >
+            <label
+              >Level<select bind:value={level}>
+                <option value={1}>1 · {t('Mulai mengenal', 'Getting started')}</option><option
+                  value={2}>2 · {t('Mulai terbiasa', 'Growing familiar')}</option
+                >
+              </select></label
+            >
+            <label
+              >{t('Bahasa latihan anak', 'Child’s exercise language')}<select bind:value={language}>
+                <option value="id">Indonesia</option><option value="en">English</option>
+              </select></label
+            >
+            <label
+              >{t('Jumlah kartu', 'Number of cards')}<input
+                aria-label={t('Jumlah kartu', 'Number of cards')}
+                type="number"
+                min="1"
+                max={available.length}
+                step="1"
+                bind:value={count}
+              /></label
+            >
+          </div>
+          <div class="pilot-actions">
+            {#each [1, 3, 5] as n}<button
+                class="button ghost"
+                class:chosen={count === n}
+                onclick={() => (count = n)}>{n} {t('kartu', 'cards')}</button
+              >{/each}
+          </div>
+          <label
+            >{t('Pemilihan kartu', 'Card selection')}<select bind:value={selection}>
+              <option value="new"
+                >{t(
+                  'Belum pernah tuntas · bahasa ini',
+                  'Not completed before · this language'
+                )}</option
+              >
+              <option value="random"
+                >{t(
+                  'Acak semua · termasuk kartu lama',
+                  'Pure random · includes practiced cards'
+                )}</option
+              >
+            </select></label
           >
-        </div>{:else}<button
-          class="button primary full mt-5"
-          disabled={busy || !Number.isInteger(count) || count < 1 || count > available.length}
-          onclick={preview}>{t('Periksa susunan sesi', 'Preview session')} →</button
-        >{/if}
-      {#if message}<p class="error-text" role="alert">{message}</p>{/if}
-    </section>
-    <aside>
-      <article class="pilot-card-preview">
-        <span class="page-eyebrow">{t('BENTUK KARTU', 'CARD FORMAT')}</span>
-        <h2>{t('Dengarkan. Bayangkan. Jawab.', 'Listen. Imagine. Answer.')}</h2>
-        <div class="preview-story">
-          {t(
-            'Cerita dibaca sekali, lalu tanyakan satu per satu. Acuan jawaban ada di layar pendamping.',
-            'Read the story once, then ask one question at a time. Answer references stay on the caregiver’s screen.'
-          )}
-        </div>
-        <ol>
-          <li>{t('Siapa?', 'Who?')}</li>
-          <li>{t('Apa yang terjadi?', 'What happened?')}</li>
-          <li>{t('Mengapa?', 'Why?')}</li>
-        </ol>
-        <p class="muted">
-          {t(
-            'Contoh struktur, bukan soal sesi. Anak tidak perlu melihat layar, termasuk dalam mode AI.',
-            'Example structure, not a session card. The child need not see the screen, including in AI mode.'
-          )}
-        </p>
-      </article>
+          <p class="fine-print">
+            {available.length}
+            {t(
+              'kartu tersedia. Tidak ada kartu ganda dalam sesi.',
+              'cards available. No duplicate cards in a session.'
+            )}
+          </p>
+        </fieldset>
+      </details>
       <p class="fine-print">
         {t(
-          'Kedua mode membutuhkan internet pada pilot. Bahasa UI di pojok atas tidak mengubah bahasa latihan.',
-          'Both pilot modes require internet. The interface language above does not change the exercise language.'
+          'Kedua mode membutuhkan internet. Anak tidak perlu melihat layar.',
+          'Both modes require internet. The child need not see the screen.'
         )}
       </p>
-    </aside>
+    </section>
   </div>
   {#if sessions.some((s) => ['active', 'paused'].includes(s.status))}<section class="mt-5">
       <h2>{t('Lanjutkan latihan', 'Continue practice')}</h2>

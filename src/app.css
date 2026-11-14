@@ -1914,34 +1914,76 @@ input::placeholder {
 .pilot .fine-print {
   font-size: 12px;
 }
-.pilot-home-grid,
+.pilot-home-grid {
+  max-width: 680px;
+}
 .pilot-session-grid {
   display: grid;
   grid-template-columns: 1.15fr 1fr;
   gap: 28px;
   align-items: start;
 }
-.pilot-home-grid .form-card h2 {
-  margin: 0 0 10px;
+.pilot-mode-choice,
+.pilot-setup-options fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
 }
-.pilot-card-preview {
-  background: #edf1e4;
-  border: 1px solid #d8e1cf;
-  padding: 34px;
-  border-radius: 22px;
-  transform: rotate(1deg);
+.pilot-mode-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
-.pilot-card-preview h2 {
-  margin: 18px 0;
+.pilot-mode-choice legend {
+  font-weight: 600;
+  margin-bottom: 14px;
 }
-.preview-story {
-  padding: 20px 0;
-  border-block: 1px solid #d1dcc6;
+.pilot-mode-choice label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 15px;
+  cursor: pointer;
+  margin: 0;
+}
+.pilot-mode-choice input {
+  width: auto;
+  margin: 3px 0 0;
+  accent-color: #2b5947;
+}
+.pilot-mode-choice .chosen {
+  background: #edf2e5;
+  border-color: #80976c;
+}
+.pilot-mode-choice small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 6px;
+}
+.pilot-start-summary {
+  margin-top: 24px;
   line-height: 1.8;
 }
-.pilot-card-preview ol {
-  padding-left: 22px;
-  line-height: 2.3;
+.pilot-start-summary p {
+  font-size: 13px;
+  color: #62715f;
+}
+.pilot-setup-options {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.pilot-setup-options summary {
+  cursor: pointer;
+  min-height: 44px;
+  font-size: 13px;
+}
+.pilot-setup-options .pilot-actions {
+  margin-bottom: 18px;
 }
 .pilot-actions {
   display: flex;
@@ -2083,16 +2125,11 @@ input::placeholder {
   color: #614c23;
 }
 @media (max-width: 760px) {
-  .pilot-home-grid,
   .pilot-session-grid {
     grid-template-columns: 1fr;
     gap: 20px;
   }
-  .pilot-card-preview {
-    transform: none;
-  }
-  .pilot-flashcard,
-  .pilot-card-preview {
+  .pilot-flashcard {
     padding: 24px;
   }
   .pilot-row-heading {
