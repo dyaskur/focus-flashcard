@@ -111,6 +111,75 @@ test('parent registers, personalizes, learns, gets hints, persists and corrects 
   await expect(page).toHaveURL(/\/beranda/);
   expect(errors).toEqual([]);
 });
+test('new sessions reset consent, cursor, feedback, and attempts without losing previous results', async ({
+  page
+}) => {
+  await register(page);
+  await page.getByRole('button', { name: /PIKIR & TEMUKAN/ }).click();
+  await page.getByRole('button', { name: 'Bintang 2, Mulai terbiasa' }).click();
+  await page.getByRole('button', { name: 'Mulai petualangan' }).click();
+  await expect(page).toHaveURL(/\/belajar\//);
+  const oldUrl = page.url();
+  const oldId = oldUrl.split('/').pop()!;
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' }).click();
+  await expect(page.getByText('Aku mendengarkan. Jawab dengan suaramu.')).toBeVisible();
+  await answer(page);
+  await page.getByRole('button', { name: 'Cerita berikutnya' }).click();
+  await expect(page.getByText('CERITA 2 DARI 5')).toBeVisible();
+  await expect(page.getByText('Aku mendengarkan. Jawab dengan suaramu.')).toBeVisible();
+  await answer(page);
+  await expect(page.getByRole('button', { name: 'Cerita berikutnya' })).toBeVisible();
+  await page.getByRole('button', { name: 'Sembunyikan teks cerita' }).click();
+  // A reconnect to the SAME answered session must still preserve its saved answer.
+  await page.reload();
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' }).click();
+  await expect(page.getByText('Jawabanmu sudah tersimpan. Yuk, lanjutkan.')).toBeVisible();
+  await page.getByRole('button', { name: 'Sembunyikan teks cerita' }).click();
+  await page.getByRole('button', { name: 'Mulai sesi baru', exact: true }).click();
+  await expect(page).not.toHaveURL(oldUrl);
+  await expect(page.getByRole('heading', { name: 'Duduk nyaman. Pasang telinga.' })).toBeVisible();
+  await expect(page.getByText('CERITA 1 DARI 5')).toBeVisible();
+  await expect(page.getByRole('checkbox')).not.toBeChecked();
+  await expect(page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' })).toBeDisabled();
+  await expect(page.getByText('Jawabanmu sudah tersimpan. Yuk, lanjutkan.')).not.toBeVisible();
+  const id = page.url().split('/').pop()!;
+  const details = await (await page.request.get(`/api/sessions/${id}`)).json();
+  expect(details.session).toMatchObject({
+    cursor: 0,
+    status: 'active',
+    category: 'logika',
+    level: 2
+  });
+  expect(details.attempts).toHaveLength(0);
+  const previous = await (await page.request.get(`/api/sessions/${oldId}`)).json();
+  expect(previous.session.status).toBe('stopped');
+  expect(previous.attempts).toHaveLength(2);
+  await page.screenshot({
+    path: test.info().outputPath('new-session-desktop.png'),
+    fullPage: true
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: test.info().outputPath('new-session-mobile.png'), fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true
+  );
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' }).click();
+  await expect(page.getByTestId('question')).toBeVisible();
+  await expect(page.getByText('Aku mendengarkan. Jawab dengan suaramu.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sembunyikan teks cerita' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cerita berikutnya' })).not.toBeVisible();
+  await page.screenshot({
+    path: test.info().outputPath('new-session-reading-mobile.png'),
+    fullPage: true
+  });
+  await answer(page);
+  await expect(page.getByRole('button', { name: 'Cerita berikutnya' })).toBeVisible();
+  expect((await (await page.request.get(`/api/sessions/${id}`)).json()).attempts).toHaveLength(1);
+});
+
 test('mobile layout, sensory mode, and unauthenticated write protection', async ({
   page,
   request

@@ -290,6 +290,26 @@
       fail(e);
     }
   }
+  async function startNew() {
+    if (busy) return;
+    busy = true;
+    message = '';
+    silence.cancel();
+    tutor?.close();
+    try {
+      await action('stop');
+      const session = await api<{ id: string }>('sessions', {
+        childId: data.child.id,
+        category: data.session.category,
+        level: data.session.level
+      });
+      await goto(`/belajar/${session.id}`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      busy = false;
+    }
+  }
   beforeNavigate(() => {
     silence.cancel();
     tutor?.close();
@@ -424,6 +444,9 @@
           >{#if phase === 'paused'}<Play size={16} /> Lanjut{:else}<Pause size={16} /> Jeda{/if}</button
         >
       </div>{/if}
+    <div class="session-controls">
+      <button class="text-link" onclick={startNew} disabled={busy}>Mulai sesi baru</button>
+    </div>
     <p class="care-note">
       <ShieldCheck size={16} /> Tidak perlu terburu-buru. Boleh mencoba lagi, kapan pun kamu siap.
     </p>

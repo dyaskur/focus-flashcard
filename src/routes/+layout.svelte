@@ -117,7 +117,9 @@
 {#if modeError}<div class="notice" role="alert">
     Mode berubah di perangkat ini, tetapi belum tersimpan: {modeError}
   </div>{/if}
-<main id="main" inert={!mounted}>{@render children()}</main>
+<main id="main" inert={!mounted}>
+  {#key page.params.id}{@render children()}{/key}
+</main>
 <noscript
   ><p class="notice">Aktifkan JavaScript untuk menggunakan ruang belajar dan mikrofon.</p></noscript
 >
