@@ -92,3 +92,41 @@ it('rejects empty/duplicate question sets before contacting Gemini', async () =>
   await expect(createLiveToken([question, question])).rejects.toThrow('unik');
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it.each(['id', 'en'] as const)(
+  'serializes strict blocking pilot tools and %s instructions using the real SDK',
+  async (language) => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ name: 'auth_tokens/pilot' })));
+    vi.stubGlobal('fetch', fetch);
+    await createLiveToken([question], { pilot: true, language });
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    const setup = JSON.parse(init.body as string).bidiGenerateContentSetup;
+    const [answer, control] = setup.tools[0].functionDeclarations;
+    expect(answer.behavior).toBe('BLOCKING');
+    expect(answer.parametersJsonSchema.additionalProperties).toBe(false);
+    expect(answer.parametersJsonSchema.properties.answerLanguage.enum).toEqual([
+      'id',
+      'en',
+      'mixed'
+    ]);
+    expect(answer.parametersJsonSchema.required).not.toContain('answerLanguage');
+    expect(control).toMatchObject({
+      name: 'control_session',
+      behavior: 'BLOCKING',
+      parametersJsonSchema: {
+        additionalProperties: false,
+        required: ['action'],
+        properties: {
+          action: { enum: ['repeat', 'hint', 'pause', 'request_skip', 'confirm_skip'] }
+        }
+      }
+    });
+    const instruction = setup.systemInstruction.parts[0].text;
+    expect(instruction).toContain(language === 'en' ? 'warm English' : 'warm Indonesian');
+    expect(instruction).toContain('Only APP_REVIEW');
+    expect(instruction).toContain('semantically correct answers');
+    expect(instruction).toContain('APP_CONTINUE');
+    expect(instruction).toContain('persisted accepted=true');
+    expect(instruction).not.toContain(question.story);
+  }
+);

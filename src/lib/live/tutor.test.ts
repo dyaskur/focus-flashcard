@@ -497,4 +497,204 @@ describe('native Live session lifecycle and audio events', () => {
     expect(FakeSocket.instances).toHaveLength(0);
     expect(FakeContext.instances[0].close).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['resolve', 'reject'])(
+    'ignores stale resume %s after connect replaces the session',
+    async (outcome) => {
+      await connected();
+      tutor.pause();
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      FakeContext.instances[0].resume.mockImplementationOnce(
+        () =>
+          new Promise<void>((yes, no) => {
+            resolve = yes;
+            reject = no;
+          })
+      );
+      const resuming = tutor.resume();
+      const socket = await connected();
+      tutor.pause();
+      const sent = socket.sent.length;
+      if (outcome === 'resolve') resolve();
+      else reject(new Error('obsolete context'));
+      await resuming;
+      expect(socket.sent).toHaveLength(sent);
+      expect(track.enabled).toBe(false);
+      expect(socket.close).not.toHaveBeenCalled();
+      expect(events.onStatus).toHaveBeenLastCalledWith('paused');
+      expect(events.onError).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe('pilot Live contract', () => {
+  it.each(['repeat', 'hint', 'pause', 'request_skip', 'confirm_skip'])(
+    'dispatches %s only to the app, never answer persistence',
+    async (action) => {
+      const onControl = vi.fn(async () => {});
+      tutor = new LiveTutor({ ...events, onControl });
+      const socket = await connected();
+      socket.message({
+        toolCall: { functionCalls: [{ id: 'control', name: 'control_session', args: { action } }] }
+      });
+      await flush();
+      expect(onControl).toHaveBeenCalledExactlyOnceWith(action);
+      expect(events.onAnswer).not.toHaveBeenCalled();
+      expect(JSON.stringify(socket.sent.at(-1))).toContain('"accepted":true');
+    }
+  );
+
+  it('does not unlock answers when a hint interrupts an unfinished question', async () => {
+    tutor = new LiveTutor(events, { pilot: true });
+    const socket = await connected();
+    tutor.hint();
+    socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+    FakeContext.instances[0].sources.at(-1)!.end();
+    expect(events.onQuestionFinished).not.toHaveBeenCalled();
+    expect(JSON.stringify(socket.sent.at(-1))).toContain('APP_CONTINUE');
+    socket.message({ toolCall: { functionCalls: [tool] } });
+    await flush();
+    expect(events.onAnswer).not.toHaveBeenCalled();
+    socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+    FakeContext.instances[0].sources.at(-1)!.end();
+    expect(events.onQuestionFinished).toHaveBeenCalledTimes(1);
+    tutor.pause();
+    await tutor.resume();
+    expect(JSON.stringify(socket.sent.at(-1))).not.toContain('story');
+  });
+
+  it('gates answers until real playback drains, but accepts strict controls while reading', async () => {
+    const onControl = vi.fn(async () => {});
+    tutor = new LiveTutor({ ...events, onControl });
+    const socket = await connected();
+    socket.message({ toolCall: { functionCalls: [tool] } });
+    await flush();
+    expect(events.onAnswer).not.toHaveBeenCalled();
+    expect(JSON.stringify(socket.sent.at(-1))).toContain('question_not_finished');
+    socket.message({
+      toolCall: {
+        functionCalls: [
+          { id: 'c1', name: 'control_session', args: { action: 'hint', extra: true } },
+          { id: 'c2', name: 'control_session', args: { action: 'hint' } }
+        ]
+      }
+    });
+    await flush();
+    expect(onControl).toHaveBeenCalledExactlyOnceWith('hint');
+    socket.message({ serverContent: { modelTurn: { parts: [audio, audio] }, turnComplete: true } });
+    socket.message({ toolCall: { functionCalls: [{ ...tool, id: 'early' }] } });
+    FakeContext.instances[0].sources[0].end();
+    await flush();
+    expect(events.onAnswer).not.toHaveBeenCalled();
+    FakeContext.instances[0].sources[1].end();
+    expect(events.onQuestionFinished).toHaveBeenCalledTimes(1);
+    socket.message({
+      toolCall: {
+        functionCalls: [{ ...tool, id: 'late', args: { ...tool.args, answerLanguage: 'en' } }]
+      }
+    });
+    await flush();
+    expect(events.onAnswer).toHaveBeenCalledWith(
+      { ...tool.args, answerLanguage: 'en' },
+      expect.any(String)
+    );
+  });
+
+  it('serializes persisted answers before controls, deduplicates controls, and survives control errors', async () => {
+    let saved!: (answer: AcceptedAnswer) => void;
+    events.onAnswer.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          saved = resolve;
+        })
+    );
+    const onControl = vi.fn(async () => {});
+    tutor = new LiveTutor({ ...events, onControl });
+    const socket = await connected();
+    socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+    FakeContext.instances[0].sources[0].end();
+    const control = { id: 'skip', name: 'control_session', args: { action: 'request_skip' } };
+    socket.message({ toolCall: { functionCalls: [tool, control, control] } });
+    await flush();
+    expect(events.onAnswer).toHaveBeenCalledTimes(1);
+    expect(onControl).not.toHaveBeenCalled();
+    saved({ verdict: 'correct', feedbackReason: 'Persisted' });
+    await flush();
+    await flush();
+    expect(onControl).toHaveBeenCalledExactlyOnceWith('request_skip');
+    onControl.mockRejectedValueOnce(new Error('uncertain'));
+    const failed = { ...control, id: 'failed' };
+    socket.message({ toolCall: { functionCalls: [failed, failed, { ...control, id: 'new' }] } });
+    await flush();
+    await flush();
+    expect(onControl).toHaveBeenCalledTimes(3);
+    expect(JSON.stringify(socket.sent)).toContain('control_not_applied');
+    expect(events.onAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for feedback playback before accepting another genuine answer attempt', async () => {
+    tutor = new LiveTutor(events, { pilot: true });
+    const socket = await connected();
+    socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+    FakeContext.instances[0].sources.at(-1)!.end();
+    socket.message({ toolCall: { functionCalls: [tool] } });
+    await flush();
+    expect(events.onAnswer).toHaveBeenCalledTimes(1);
+    socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+    socket.message({
+      toolCall: {
+        functionCalls: [{ ...tool, id: 'echo', args: { ...tool.args, answerText: 'speaker echo' } }]
+      }
+    });
+    await flush();
+    expect(events.onAnswer).toHaveBeenCalledTimes(1);
+    FakeContext.instances[0].sources.at(-1)!.end();
+    socket.message({
+      toolCall: {
+        functionCalls: [
+          {
+            ...tool,
+            id: 'next-attempt',
+            args: { ...tool.args, answerText: 'another genuine attempt' }
+          }
+        ]
+      }
+    });
+    await flush();
+    expect(events.onAnswer).toHaveBeenCalledTimes(2);
+    expect(events.onQuestionFinished).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues an interrupted story with mic active, rejects invented answers, and does not count review/nudges as questions', async () => {
+    tutor = new LiveTutor(events, { pilot: true });
+    const socket = await connected();
+    socket.message({ serverContent: { modelTurn: { parts: [audio] } } });
+    socket.message({
+      serverContent: { interrupted: true, turnComplete: true },
+      toolCall: { functionCalls: [tool] }
+    });
+    await flush();
+    expect(track.enabled).toBe(true);
+    expect(JSON.stringify(socket.sent.at(-1))).toContain('APP_CONTINUE');
+    expect(events.onAnswer).not.toHaveBeenCalled();
+    expect(events.onQuestionFinished).not.toHaveBeenCalled();
+    FakeWorklet.instances[0].capture(0.02);
+    expect(socket.sent.at(-1)).toHaveProperty('realtimeInput');
+    socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+    FakeContext.instances[0].sources.at(-1)!.end();
+    tutor.present({ ...question, id: 'q2' }, { readStory: false });
+    const text = JSON.stringify(socket.sent.at(-1));
+    expect(text).not.toContain('story');
+    expect(text).not.toContain('expectedAnswer');
+    expect(text).toContain(question.prompt);
+    tutor.nudge(1);
+    tutor.nudge(2);
+    tutor.nudge(3);
+    tutor.review('App-authorized explanation.');
+    socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+    FakeContext.instances[0].sources.at(-1)!.end();
+    expect(events.onQuestionFinished).toHaveBeenCalledTimes(1);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
 });

@@ -1,6 +1,11 @@
 import type { FunctionCall, LiveServerMessage } from '@google/genai';
 import type { Question } from '../types';
-import { AnswerReporter, type LiveCredentials, type LiveTutorCallbacks } from './protocol';
+import {
+  AnswerReporter,
+  controlEventSchema,
+  type LiveCredentials,
+  type LiveTutorCallbacks
+} from './protocol';
 import { MicActivity, PcmPlayer, PlaybackBoundary, pcm16ToBase64 } from './audio';
 
 const LIVE_URL =
@@ -30,8 +35,24 @@ export class LiveTutor {
   private epoch = 0;
   private speechTurn = 0;
   private status = '';
+  private readStory = true;
+  private questionPending = false;
+  private hintPlaying = false;
+  private answersReady = false;
+  private restoreAnswers = false;
+  private commandVersion = 0;
+  private toolQueue: Promise<void> = Promise.resolve();
+  private controls = new Map<string, { action: string; result: Record<string, unknown> }>();
 
-  constructor(private callbacks: LiveTutorCallbacks) {}
+  /** onControl enables pilot mode by default; explicit pilot supports answer-only clients. */
+  constructor(
+    private callbacks: LiveTutorCallbacks,
+    private options: { pilot?: boolean } = {}
+  ) {}
+
+  private get pilot(): boolean {
+    return this.options.pilot ?? !!this.callbacks.onControl;
+  }
 
   async connect(credentials: LiveCredentials): Promise<void> {
     this.dispose();
@@ -92,6 +113,7 @@ export class LiveTutor {
           } else if (change === 'end') {
             if (this.player?.empty) this.setStatus('thinking');
             this.checkFinished();
+            this.callbacks.onSpeechEnd?.();
           }
           this.send({
             realtimeInput: {
@@ -127,8 +149,10 @@ export class LiveTutor {
     }
   }
 
-  present(question: Question): void {
+  present(question: Question, options: { readStory?: boolean } = {}): void {
     this.question = question;
+    this.readStory = options.readStory ?? true;
+    this.answersReady = false;
     if (!this.paused) this.command('APP_PRESENT');
   }
 
@@ -138,6 +162,33 @@ export class LiveTutor {
 
   hint(): void {
     if (this.question && !this.paused) this.command('APP_HINT');
+  }
+
+  review(text: string): void {
+    if (!text.trim() || text.length > 4000) throw new Error('Penjelasan tidak valid.');
+    this.speak('APP_REVIEW', { text });
+    this.answersReady = false;
+  }
+
+  nudge(stage: 1 | 2 | 3, hint?: string): void {
+    if (![1, 2, 3].includes(stage)) throw new Error('Tahap pengingat tidak valid.');
+    this.speak('APP_NUDGE', { stage, ...(hint ? { hint } : {}) });
+  }
+
+  private speak(action: string, data: Record<string, unknown>): void {
+    if (!this.ready || this.paused) return;
+    this.restoreAnswers = action === 'APP_NUDGE' && this.answersReady;
+    this.answersReady = false;
+    this.commandVersion++;
+    this.questionPending = false;
+    this.hintPlaying = false;
+    this.clearPlayback();
+    this.setStatus('thinking');
+    try {
+      this.sendText(`${action}\n${JSON.stringify(data)}`);
+    } catch {
+      this.fail('Pesan tidak dapat dikirim. Silakan sambungkan ulang.');
+    }
   }
 
   pause(): void {
@@ -165,9 +216,10 @@ export class LiveTutor {
 
   async resume(): Promise<void> {
     if (this.closed || !this.paused) return;
+    const epoch = this.epoch;
     try {
       await this.context?.resume();
-      if (this.closed) return;
+      if (this.closed || epoch !== this.epoch) return;
       this.paused = false;
       this.player?.mute(false);
       this.setMicrophone(this.ready);
@@ -176,6 +228,7 @@ export class LiveTutor {
         this.reconnect('Sesi suara perlu disambungkan kembali.');
       else this.setStatus(this.ready ? 'listening' : 'connecting');
     } catch {
+      if (this.closed || epoch !== this.epoch) return;
       this.fail('Audio tidak dapat dilanjutkan. Silakan sambungkan ulang.');
     }
   }
@@ -187,13 +240,24 @@ export class LiveTutor {
 
   private command(action: 'APP_PRESENT' | 'APP_REPEAT' | 'APP_HINT'): void {
     if (!this.ready || !this.question) throw new Error('Sesi suara belum tersambung.');
+    this.commandVersion++;
+    this.hintPlaying = this.pilot && action === 'APP_HINT';
+    this.restoreAnswers = this.hintPlaying && this.answersReady;
+    if (this.pilot) this.answersReady = false;
+    if (!this.hintPlaying) {
+      this.questionPending = true;
+      this.answersReady = false;
+    }
     this.clearPlayback();
     this.activity.reset();
     this.setStatus('thinking');
     // Do not send an account/profile object or answer keys from the browser.
     const { id, story, prompt, hint } = this.question;
     try {
-      this.sendText(`${action}\n${JSON.stringify({ id, story, prompt, hint })}`);
+      // Question-only transitions never resend the story, even after resume/reconnect.
+      this.sendText(
+        `${action}\n${JSON.stringify(this.readStory ? { id, story, prompt, hint } : { id, prompt, hint })}`
+      );
     } catch {
       this.fail('Soal tidak dapat dikirim. Silakan sambungkan ulang.');
     }
@@ -295,6 +359,8 @@ export class LiveTutor {
     if (update?.resumable && update.newHandle) this.resumptionHandle = update.newHandle;
     for (const id of message.toolCallCancellation?.ids ?? []) this.cancelledCalls.add(id);
     const content = message.serverContent;
+    const continueQuestion = this.pilot && this.questionPending && !!content?.interrupted;
+    const version = this.commandVersion;
     if (content?.interrupted) {
       this.clearPlayback();
       if (!this.paused) this.setStatus('thinking');
@@ -314,7 +380,30 @@ export class LiveTutor {
         }
       }
     }
-    for (const call of message.toolCall?.functionCalls ?? []) void this.handleTool(call, socket);
+    for (const call of message.toolCall?.functionCalls ?? []) {
+      const answerAllowed = !this.pilot || this.answersReady;
+      const turn = this.speechTurn;
+      this.toolQueue = this.toolQueue
+        .then(() => this.handleTool(call, socket, answerAllowed, turn))
+        .catch(() => {
+          if (!this.closed && this.socket === socket)
+            this.fail('Perintah suara tidak dapat diproses. Silakan sambungkan ulang.');
+        });
+    }
+    if (continueQuestion) {
+      // Server VAD is not keyword-only. Keep capture active and guide interrupted reading
+      // back to its unfinished sentence; do not turn incidental noise into an answer.
+      this.toolQueue = this.toolQueue.then(() => {
+        if (
+          !this.closed &&
+          !this.paused &&
+          this.socket === socket &&
+          this.questionPending &&
+          version === this.commandVersion
+        )
+          this.continueQuestion();
+      });
+    }
     if (content?.turnComplete) {
       this.boundary.complete();
       this.checkFinished();
@@ -323,29 +412,44 @@ export class LiveTutor {
       this.reconnect('Gemini memperbarui koneksi sesi suara.');
   }
 
-  private async handleTool(call: FunctionCall, socket: WebSocket): Promise<void> {
+  private async handleTool(
+    call: FunctionCall,
+    socket: WebSocket,
+    answerAllowed: boolean,
+    speechTurn: number
+  ): Promise<void> {
+    if (this.closed || this.socket !== socket) return;
     if (call.id && this.cancelledCalls.has(call.id)) return;
     this.setStatus(this.paused ? 'paused' : 'thinking');
-    const result = this.paused
-      ? { accepted: false, error: 'session_paused' }
-      : await this.reporter.report(
-          call,
-          this.question?.id,
-          async (event, eventId) => {
-            if (
-              this.closed ||
-              this.paused ||
-              this.socket !== socket ||
-              event.questionId !== this.question?.id ||
-              (call.id && this.cancelledCalls.has(call.id))
-            )
-              throw new DOMException('Soal tidak aktif.', 'AbortError');
-            return this.callbacks.onAnswer(event, eventId);
-          },
-          this.speechTurn
-        );
+    const result =
+      call.name === 'control_session'
+        ? await this.handleControl(call)
+        : this.paused
+          ? { accepted: false, error: 'session_paused' }
+          : this.pilot && (!answerAllowed || !this.answersReady)
+            ? { accepted: false, error: 'question_not_finished' }
+            : await this.reporter.report(
+                call,
+                this.question?.id,
+                async (event, eventId) => {
+                  if (
+                    this.closed ||
+                    this.paused ||
+                    this.socket !== socket ||
+                    event.questionId !== this.question?.id ||
+                    (call.id && this.cancelledCalls.has(call.id))
+                  )
+                    throw new DOMException('Soal tidak aktif.', 'AbortError');
+                  return this.callbacks.onAnswer(event, eventId);
+                },
+                speechTurn
+              );
     if (this.closed || this.socket !== socket || (call.id && this.cancelledCalls.has(call.id)))
       return;
+    if (this.pilot && call.name === 'report_answer' && result.accepted === true) {
+      this.restoreAnswers = true;
+      this.answersReady = false;
+    }
     try {
       this.send({
         toolResponse: { functionResponses: [{ id: call.id, name: call.name, response: result }] }
@@ -357,11 +461,64 @@ export class LiveTutor {
     }
   }
 
+  private async handleControl(call: FunctionCall): Promise<Record<string, unknown>> {
+    const parsed = controlEventSchema.safeParse(call.args);
+    if (!call.id || call.id.length > 128 || !parsed.success || !this.callbacks.onControl)
+      return { accepted: false, error: 'invalid_control' };
+    const { action } = parsed.data;
+    const previous = this.controls.get(call.id);
+    if (previous)
+      return previous.action === action
+        ? previous.result
+        : { accepted: false, error: 'tool_call_id_reused' };
+    // Cache uncertain failures too: retrying a non-idempotent skip could skip two questions.
+    const entry = {
+      action,
+      result: { accepted: false, error: 'control_not_applied' } as Record<string, unknown>
+    };
+    this.controls.set(call.id, entry);
+    try {
+      await this.callbacks.onControl(action);
+      entry.result = { accepted: true, action };
+    } catch {
+      // The app owns error presentation and reconciliation of an uncertain control.
+    }
+    return entry.result;
+  }
+
   private checkFinished(): void {
     if (this.closed || this.paused || !this.ready || this.activity.active || !this.question) return;
     if (this.boundary.takeFinished(this.player?.empty ?? true)) {
       this.setStatus('listening');
+      if (this.pilot && this.hintPlaying) {
+        this.hintPlaying = false;
+        this.answersReady = this.restoreAnswers;
+        this.restoreAnswers = false;
+        if (this.questionPending) {
+          this.boundary.reset();
+          this.setStatus('thinking');
+          this.continueQuestion();
+        }
+        return;
+      }
+      if (this.pilot && !this.questionPending) {
+        this.answersReady = this.restoreAnswers;
+        this.restoreAnswers = false;
+        return;
+      }
+      this.questionPending = false;
+      this.answersReady = true;
+      if (this.pilot) this.readStory = false;
       this.callbacks.onQuestionFinished();
+    }
+  }
+
+  private continueQuestion(): void {
+    this.hintPlaying = false;
+    try {
+      this.sendText('APP_CONTINUE');
+    } catch {
+      this.reconnect('Cerita belum dapat dilanjutkan.');
     }
   }
 
@@ -458,6 +615,14 @@ export class LiveTutor {
     this.resumptionHandle = undefined;
     this.reconnectAttempts = 0;
     this.speechTurn = 0;
+    this.readStory = true;
+    this.questionPending = false;
+    this.hintPlaying = false;
+    this.answersReady = false;
+    this.restoreAnswers = false;
+    this.commandVersion++;
+    this.toolQueue = Promise.resolve();
+    this.controls.clear();
     this.reporter.clear();
     this.cancelledCalls.clear();
     this.boundary.reset();

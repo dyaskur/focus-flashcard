@@ -123,4 +123,20 @@ describe('structured answer protocol', () => {
       error: 'answer_not_saved'
     });
   });
+
+  it.each(['id', 'en', 'mixed'])(
+    'forwards only explicitly reported answer language %s',
+    async (answerLanguage) => {
+      const save = vi.fn(async () => ({ verdict: 'correct' as const, feedbackReason: 'OK' }));
+      await new AnswerReporter().report(call({ ...answer, answerLanguage }), 'q1', save);
+      expect(save).toHaveBeenCalledWith({ ...answer, answerLanguage }, expect.any(String));
+      const invalid = await new AnswerReporter().report(
+        call({ ...answer, answerLanguage: 'fr' }),
+        'q1',
+        save
+      );
+      expect(invalid.accepted).toBe(false);
+      expect(save).toHaveBeenCalledTimes(1);
+    }
+  );
 });

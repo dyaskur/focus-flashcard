@@ -11,10 +11,16 @@ export interface LiveCredentials {
 /** Return the persisted server verdict, not the model's proposed verdict. */
 export type AcceptedAnswer = Pick<AnswerEvent, 'verdict' | 'feedbackReason'>;
 
+export type LiveAnswerEvent = AnswerEvent & { answerLanguage?: 'id' | 'en' | 'mixed' };
+export type SessionControl = 'repeat' | 'hint' | 'pause' | 'request_skip' | 'confirm_skip';
+
 export interface LiveTutorCallbacks {
   onStatus(status: string): void;
-  onAnswer(event: AnswerEvent, eventId: string): Promise<AcceptedAnswer>;
+  onAnswer(event: LiveAnswerEvent, eventId: string): Promise<AcceptedAnswer>;
+  /** Presence enables pilot playback gating. The app owns every control side effect. */
+  onControl?(action: SessionControl): Promise<void>;
   onSpeechStart(): void;
+  onSpeechEnd?(): void;
   onQuestionFinished(): void;
   onError(message: string): void;
 }
@@ -26,8 +32,13 @@ export const answerEventSchema = z
     answerText: z.string().trim().min(1).max(2000),
     verdict,
     confidence: z.number().finite().min(0).max(1),
-    feedbackReason: z.string().trim().min(1).max(1000)
+    feedbackReason: z.string().trim().min(1).max(1000),
+    answerLanguage: z.enum(['id', 'en', 'mixed']).optional()
   })
+  .strict();
+
+export const controlEventSchema = z
+  .object({ action: z.enum(['repeat', 'hint', 'pause', 'request_skip', 'confirm_skip']) })
   .strict();
 
 const acceptedAnswerSchema = z.object({

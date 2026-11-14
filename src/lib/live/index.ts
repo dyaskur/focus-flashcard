@@ -1,2 +1,8 @@
 export { LiveTutor } from './tutor';
-export type { AcceptedAnswer, LiveCredentials, LiveTutorCallbacks } from './protocol';
+export type {
+  AcceptedAnswer,
+  LiveAnswerEvent,
+  LiveCredentials,
+  LiveTutorCallbacks,
+  SessionControl
+} from './protocol';
