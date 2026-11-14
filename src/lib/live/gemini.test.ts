@@ -47,6 +47,12 @@ it('uses the REAL SDK serializer to provision one-use v1beta tokens with server-
   expect(locked.generationConfig.responseModalities).toEqual(['AUDIO']);
   expect(locked.inputAudioTranscription).toEqual({});
   expect(locked.outputAudioTranscription).toEqual({});
+  expect(locked.realtimeInputConfig.automaticActivityDetection).toEqual({
+    disabled: false,
+    startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+    prefixPaddingMs: 200,
+    silenceDurationMs: 800
+  });
   expect(locked.tools[0].functionDeclarations[0]).toMatchObject({
     name: 'report_answer',
     behavior: 'BLOCKING'
@@ -58,6 +64,7 @@ it('uses the REAL SDK serializer to provision one-use v1beta tokens with server-
   expect(request.fieldMask).toContain('systemInstruction.parts');
   expect(request.fieldMask).toContain('tools');
   expect(request.fieldMask).toContain('generationConfig.responseModalities');
+  expect(request.fieldMask).toContain('realtimeInputConfig.automaticActivityDetection');
   expect(request.fieldMask).not.toContain('sessionResumption');
   expect(locked.sessionResumption).toBeUndefined();
   expect(JSON.stringify(credentials)).not.toContain('server-only-test-key');

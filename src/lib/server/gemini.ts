@@ -1,4 +1,10 @@
-import { Behavior, GoogleGenAI, Modality, type LiveConnectConfig } from '@google/genai';
+import {
+  Behavior,
+  GoogleGenAI,
+  Modality,
+  StartSensitivity,
+  type LiveConnectConfig
+} from '@google/genai';
 import type { Question } from '../types';
 import type { LiveCredentials } from '../live/protocol';
 
@@ -27,7 +33,12 @@ export async function createLiveToken(questions: Question[]): Promise<LiveCreden
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     realtimeInputConfig: {
-      automaticActivityDetection: { disabled: false, prefixPaddingMs: 80, silenceDurationMs: 800 }
+      automaticActivityDetection: {
+        disabled: false,
+        startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+        prefixPaddingMs: 200,
+        silenceDurationMs: 800
+      }
     },
     contextWindowCompression: { slidingWindow: {} },
     systemInstruction: {
