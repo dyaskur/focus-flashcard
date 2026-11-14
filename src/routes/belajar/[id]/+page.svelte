@@ -31,6 +31,8 @@
   let message = $state('');
   let testMode = $state(false);
   let busy = $state(false);
+  let savingAnswer = $state(false);
+  let disposed = false;
   let answered = $state(
     untrack(() =>
       data.attempts.some(
@@ -43,7 +45,7 @@
   let questionEndedAt: number | null = null;
   let responseTimeMs: number | null = null;
   let tutor: LiveTutor | MockTutor | undefined;
-  let pending: { event: AnswerEvent; eventId: string; responseTimeMs: number | null } | undefined;
+  let pending = $state<{ event: AnswerEvent; eventId: string; responseTimeMs: number | null }>();
   let attempts = $state(
     untrack(() =>
       data.attempts.map((a) => ({
@@ -77,31 +79,42 @@
     phase = transition(phase, to);
   }
   function fail(error: unknown) {
+    if (disposed) return;
     silence.cancel();
     tutor?.pause();
     message = error instanceof Error ? error.message : String(error);
     if (phase !== 'completed') move('error');
   }
-  async function action(name: 'next' | 'pause' | 'resume' | 'stop' | 'hint') {
+  async function action(name: 'next' | 'pause' | 'resume' | 'stop' | 'hint', questionId?: string) {
     return api<{ status: string; cursor: number }>(`sessions/${data.session.id}/action`, {
-      action: name
+      action: name,
+      ...(questionId ? { questionId } : {})
     });
   }
   async function showHint() {
-    if (!current || answered || ['paused', 'error', 'completed'].includes(phase) || hintShown)
+    if (
+      disposed ||
+      !current ||
+      answered ||
+      ['paused', 'error', 'completed'].includes(phase) ||
+      hintShown
+    )
       return;
+    const questionId = current.id;
     silence.cancel();
     hintShown = true;
     try {
-      await action('hint');
+      await action('hint', questionId);
+      if (disposed || current?.id !== questionId) return;
       tutor?.hint();
     } catch (e) {
+      if (disposed || current?.id !== questionId) return;
       fail(e);
     }
   }
   const callbacks: LiveTutorCallbacks = {
     onStatus(status) {
-      if (['paused', 'error', 'completed'].includes(phase)) return;
+      if (disposed || ['paused', 'error', 'completed'].includes(phase)) return;
       if (status === 'speaking') {
         silence.cancel();
         if (!answered) move('presenting');
@@ -112,7 +125,7 @@
       }
       if (status === 'reconnecting') {
         silence.cancel();
-        move('reconnecting');
+        if (phase !== 'connecting') move('reconnecting');
       }
     },
     onSpeechStart() {
@@ -121,7 +134,7 @@
         responseTimeMs = Math.max(0, Math.round(performance.now() - questionEndedAt));
     },
     onQuestionFinished() {
-      if (answered || ['paused', 'error', 'completed'].includes(phase)) return;
+      if (disposed || answered || ['paused', 'error', 'completed'].includes(phase)) return;
       move('awaiting_answer');
       questionEndedAt = performance.now();
       responseTimeMs = null;
@@ -132,14 +145,21 @@
   };
   async function saveAnswer(event: AnswerEvent, eventId: string) {
     silence.cancel();
-    if (!current || event.questionId !== current.id || ['paused', 'completed'].includes(phase))
+    if (
+      disposed ||
+      !current ||
+      event.questionId !== current.id ||
+      ['paused', 'completed'].includes(phase)
+    )
       throw new Error('Soal tidak aktif.');
+    savingAnswer = true;
     pending ??= { event, eventId, responseTimeMs };
     try {
       const saved = await api<{ verdict: AnswerEvent['verdict']; hintUsed: boolean }>(
         `sessions/${data.session.id}/attempts`,
         { ...pending.event, eventId: pending.eventId, responseTimeMs: pending.responseTimeMs }
       );
+      if (disposed) throw new Error('Sesi sudah ditinggalkan.');
       pending = undefined;
       attempts.push({
         questionId: event.questionId,
@@ -159,10 +179,12 @@
     } catch (e) {
       fail(e);
       throw e;
+    } finally {
+      savingAnswer = false;
     }
   }
   async function connect() {
-    if (!consent || busy) return;
+    if (disposed || !consent || busy || savingAnswer) return;
     busy = true;
     message = '';
     silence.cancel();
@@ -172,6 +194,7 @@
       const freshResponse = await fetch(`/api/sessions/${data.session.id}`);
       if (!freshResponse.ok) throw new Error('Sesi tidak dapat dimuat.');
       const fresh = await freshResponse.json();
+      if (disposed) return;
       if (['completed', 'stopped'].includes(fresh.session.status)) {
         move('presenting');
         move('next_question');
@@ -179,24 +202,33 @@
         return;
       }
       if (fresh.session.status === 'paused') await action('resume');
+      if (disposed) return;
       cursor = fresh.session.cursor;
       answered = fresh.attempts.some(
         (a: { questionId: string; verdict: Verdict }) =>
           a.questionId === data.questions[cursor].id && ['correct', 'skipped'].includes(a.verdict)
       );
+      if (pending && (pending.event.questionId !== data.questions[cursor].id || answered))
+        pending = undefined;
       hintShown = fresh.session.hintedQuestionIds.includes(data.questions[cursor].id);
       const credentials = await api<LiveCredentials & { test?: boolean }>(
         `sessions/${data.session.id}/token`,
         {}
       );
+      if (disposed) return;
       testMode = !!credentials.test;
       if (testMode) {
         const { MockTutor } = await import('$lib/testing/mock-tutor');
+        if (disposed) return;
         tutor = new MockTutor(callbacks);
         await tutor.connect();
       } else {
         tutor = new LiveTutor(callbacks);
         await tutor.connect(credentials);
+      }
+      if (disposed) {
+        tutor.close();
+        return;
       }
       move('presenting');
       if (pending) {
@@ -214,7 +246,7 @@
     }
   }
   async function next(skip = false) {
-    if (!current || busy) return;
+    if (disposed || !current || busy || savingAnswer || pending) return;
     busy = true;
     silence.cancel();
     tutor?.pause();
@@ -254,6 +286,7 @@
     }
   }
   async function pause() {
+    if (disposed || savingAnswer) return;
     silence.cancel();
     message = '';
     try {
@@ -291,7 +324,7 @@
     }
   }
   async function startNew() {
-    if (busy) return;
+    if (disposed || busy || savingAnswer) return;
     busy = true;
     message = '';
     silence.cancel();
@@ -311,10 +344,12 @@
     }
   }
   beforeNavigate(() => {
+    disposed = true;
     silence.cancel();
     tutor?.close();
   });
   onDestroy(() => {
+    disposed = true;
     silence.cancel();
     tutor?.close();
   });
@@ -419,8 +454,10 @@
             </div>
           </aside>{/if}
         {#if feedback}<p class="feedback-line" role="status">{feedback}</p>{/if}
-        {#if answered}<button class="button primary mt-5" onclick={() => next()} disabled={busy}
-            >Cerita berikutnya<ArrowRight size={18} /></button
+        {#if answered}<button
+            class="button primary mt-5"
+            onclick={() => next()}
+            disabled={busy || savingAnswer}>Cerita berikutnya<ArrowRight size={18} /></button
           >{/if}
         <button class="text-toggle" onclick={() => (showText = !showText)}
           >{showText ? 'Sembunyikan teks cerita' : 'Tampilkan teks cerita'}</button
@@ -434,18 +471,21 @@
         <button
           class="button ghost"
           onclick={repeat}
-          disabled={answered || phase === 'paused' || busy}
+          disabled={answered || phase === 'paused' || busy || savingAnswer}
           ><RotateCcw size={16} /> Ulangi cerita</button
         ><button
           class="button ghost"
           onclick={() => next(true)}
-          disabled={phase === 'paused' || busy}><SkipForward size={17} /> Lewati</button
-        ><button class="button ghost" onclick={pause} disabled={busy}
+          disabled={phase === 'paused' || busy || savingAnswer || !!pending}
+          ><SkipForward size={17} /> Lewati</button
+        ><button class="button ghost" onclick={pause} disabled={busy || savingAnswer}
           >{#if phase === 'paused'}<Play size={16} /> Lanjut{:else}<Pause size={16} /> Jeda{/if}</button
         >
       </div>{/if}
     <div class="session-controls">
-      <button class="text-link" onclick={startNew} disabled={busy}>Mulai sesi baru</button>
+      <button class="text-link" onclick={startNew} disabled={busy || savingAnswer}
+        >Mulai sesi baru</button
+      >
     </div>
     <p class="care-note">
       <ShieldCheck size={16} /> Tidak perlu terburu-buru. Boleh mencoba lagi, kapan pun kamu siap.

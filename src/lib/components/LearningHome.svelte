@@ -81,7 +81,11 @@
         <span class="step-label">01 <span>PILIH PETUALANGANMU</span></span>
         <h2 id="choose-title">Mau belajar apa hari ini?</h2>
       </div>
-      <span class="section-note">Dua cara seru untuk bertumbuh <Sparkles size={15} /></span>
+      {#if authenticated}<a class="button secondary" href="/pendamping?legacy=1"
+          >Riwayat & laporan →</a
+        >{:else}<span class="section-note"
+          >Dua cara seru untuk bertumbuh <Sparkles size={15} /></span
+        >{/if}
     </div>
     <div class="category-grid">
       <button

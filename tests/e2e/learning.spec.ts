@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
 const password = 'Test-password-strong-123';
 async function register(page: Page) {
   const email = `${randomUUID()}@example.test`;
@@ -93,7 +94,19 @@ test('parent registers, personalizes, learns, gets hints, persists and corrects 
   await page.locator('summary').first().click();
   await expect(page.getByText('Soal 1 · Percobaan 1')).toBeVisible();
   await page.screenshot({ path: test.info().outputPath('history.png'), fullPage: true });
-  await page.getByLabel('Koreksi soal 1 percobaan 1').selectOption('correct');
+  let releaseCorrection!: () => void;
+  const correctionGate = new Promise<void>((resolve) => {
+    releaseCorrection = resolve;
+  });
+  await page.route(`**/api/sessions/${sessionId}/correct`, async (route) => {
+    await correctionGate;
+    await route.continue();
+  });
+  const correction = page.getByLabel('Koreksi soal 1 percobaan 1');
+  await correction.selectOption('correct');
+  await expect(correction).toBeDisabled();
+  releaseCorrection();
+  await expect(correction).toBeEnabled();
   await expect(page.getByText(/Dikoreksi pendamping/)).toBeVisible();
   await page.getByRole('link', { name: 'Ringkasan belajar' }).click();
   await expect(page.getByTestId('accuracy')).toHaveText('75%');
@@ -116,6 +129,13 @@ test('new sessions reset consent, cursor, feedback, and attempts without losing 
   page
 }) => {
   await register(page);
+  await page.route('**/api/sessions', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{' })
+  );
+  await page.getByRole('button', { name: 'Mulai petualangan' }).click();
+  await expect(page.getByText('Respons server tidak valid.', { exact: false })).toBeVisible();
+  await expect(page).toHaveURL(/\/beranda\?legacy=1/);
+  await page.unroute('**/api/sessions');
   await page.getByRole('button', { name: /PIKIR & TEMUKAN/ }).click();
   await page.getByRole('button', { name: 'Bintang 2, Mulai terbiasa' }).click();
   await page.getByRole('button', { name: 'Mulai petualangan' }).click();
@@ -205,6 +225,131 @@ test('mobile layout, sensory mode, and unauthenticated write protection', async 
     data: {}
   });
   expect(csrf.status()).toBe(403);
+  await register(page);
+  const reports = page.getByRole('link', { name: 'Riwayat & laporan' });
+  await expect(reports).toBeVisible();
+  await reports.scrollIntoViewIfNeeded();
+  await expect(reports).toBeInViewport();
+  await mkdir('.amp/in/artifacts', { recursive: true });
+  await page.screenshot({ path: '.amp/in/artifacts/legacy-mobile-reports.png', fullPage: true });
+  await reports.click();
+  await expect(page).toHaveURL(/\/pendamping\?legacy=1/);
+  await page.goto('/offline.html');
+  await expect(page.getByText('Koneksi internet belum tersedia.', { exact: false })).toBeVisible();
+  await page.screenshot({ path: '.amp/in/artifacts/offline-contrast.png', fullPage: true });
+  const contrast = await page
+    .locator('p')
+    .first()
+    .evaluate((p) => {
+      const luminance = (color: string) => {
+        const channels = color
+          .match(/\d+/g)!
+          .slice(0, 3)
+          .map(Number)
+          .map((v) => {
+            const c = v / 255;
+            return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          });
+        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+      };
+      const text = luminance(getComputedStyle(p).color);
+      const background = luminance(getComputedStyle(document.body).backgroundColor);
+      return (Math.max(text, background) + 0.05) / (Math.min(text, background) + 0.05);
+    });
+  expect(contrast).toBeGreaterThanOrEqual(4.5);
+});
+
+test('legacy answer saves block skipping and obsolete pending answers do not block reconnect', async ({
+  page
+}) => {
+  await register(page);
+  await page.getByRole('button', { name: 'Mulai petualangan' }).click();
+  await expect(page).toHaveURL(/\/belajar\//);
+  const id = page.url().split('/').pop()!;
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' }).click();
+  await expect(page.getByText('Aku mendengarkan. Jawab dengan suaramu.')).toBeVisible();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/api/sessions/${id}/attempts`, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await answer(page);
+  await expect(page.getByRole('button', { name: 'Lewati', exact: true })).toBeDisabled();
+  release();
+  await expect(page.getByRole('button', { name: 'Cerita berikutnya' })).toBeEnabled();
+  await page.unroute(`**/api/sessions/${id}/attempts`);
+  await page.getByRole('button', { name: 'Cerita berikutnya' }).click();
+  await expect(page.getByText('CERITA 2 DARI 5')).toBeVisible();
+  await expect(page.getByText('Aku mendengarkan. Jawab dengan suaramu.')).toBeVisible();
+  await page.route(`**/api/sessions/${id}/attempts`, (route) => route.abort('failed'));
+  await answer(page);
+  await expect(page.getByRole('heading', { name: 'Kita coba sambungkan lagi.' })).toBeVisible();
+  await page.unroute(`**/api/sessions/${id}/attempts`);
+  const saved = await (await page.request.get(`/api/sessions/${id}`)).json();
+  const headers = { Origin: 'http://localhost:5174' };
+  expect(
+    (
+      await page.request.post(`/api/sessions/${id}/attempts`, {
+        headers,
+        data: {
+          eventId: randomUUID(),
+          questionId: saved.questions[1].id,
+          answerText: '',
+          verdict: 'skipped',
+          confidence: 1,
+          feedbackReason: '',
+          responseTimeMs: null
+        }
+      })
+    ).ok()
+  ).toBe(true);
+  expect(
+    (
+      await page.request.post(`/api/sessions/${id}/action`, { headers, data: { action: 'next' } })
+    ).ok()
+  ).toBe(true);
+  await page.getByRole('button', { name: 'Sambungkan kembali', exact: true }).click();
+  await expect(page.getByText('CERITA 3 DARI 5')).toBeVisible();
+  await expect(page.getByText('Aku mendengarkan. Jawab dengan suaramu.')).toBeVisible();
+  await answer(page);
+  await expect(page.getByRole('button', { name: 'Cerita berikutnya' })).toBeEnabled();
+});
+
+test('legacy leaving during delayed session refresh cannot open a tutor afterward', async ({
+  page
+}) => {
+  await register(page);
+  await page.getByRole('button', { name: 'Mulai petualangan' }).click();
+  await expect(page).toHaveURL(/\/belajar\//);
+  const id = page.url().split('/').pop()!;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/api/sessions/${id}`, async (route) => {
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response });
+  });
+  let tokens = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith(`/sessions/${id}/token`)) tokens++;
+  });
+  await page.getByRole('checkbox').check();
+  const refreshing = page.waitForRequest((request) =>
+    request.url().endsWith(`/api/sessions/${id}`)
+  );
+  await page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' }).click();
+  await refreshing;
+  await page.getByRole('link', { name: 'Fokus, Dengar, dan Pikir, beranda' }).click();
+  await expect(page).toHaveURL(/\/beranda/);
+  release();
+  await page.waitForLoadState('networkidle');
+  expect(tokens).toBe(0);
 });
 
 test('voice credentials require session ownership, active state, and rate limits', async ({

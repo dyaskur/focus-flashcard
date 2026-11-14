@@ -16,6 +16,7 @@
   import PilotReport from '$lib/pilot/PilotReport.svelte';
   let { data } = $props();
   let message = $state('');
+  let correcting = $state<string[]>([]);
   const metrics = $derived(data.metrics);
   const historyMode = $derived(page.url.searchParams.get('tab') === 'riwayat');
   const verdictLabels: Record<Verdict, string> = {
@@ -31,14 +32,20 @@
     stopped: 'Dihentikan'
   };
   async function correct(sessionId: string, attemptId: string, event: Event) {
+    if (correcting.includes(attemptId)) return;
+    const select = event.target as HTMLSelectElement;
+    correcting = [...correcting, attemptId];
     try {
       await api(`sessions/${sessionId}/correct`, {
         attemptId,
-        verdict: (event.target as HTMLSelectElement).value
+        verdict: select.value
       });
       await invalidateAll();
     } catch (e) {
+      select.value = data.attempts.find((a) => a.id === attemptId)?.verdict ?? select.value;
       message = (e as Error).message;
+    } finally {
+      correcting = correcting.filter((id) => id !== attemptId);
     }
   }
 </script>
@@ -235,6 +242,7 @@
                 >{#if attempt.verdict !== 'skipped'}<select
                     aria-label={`Koreksi soal ${session.questionIds.indexOf(attempt.questionId) + 1} percobaan ${attempt.attemptNumber}`}
                     value={attempt.verdict}
+                    disabled={correcting.includes(attempt.id)}
                     onchange={(event) => correct(session.id, attempt.id, event)}
                     ><option value="correct">Benar</option><option value="incorrect"
                       >Belum tepat</option

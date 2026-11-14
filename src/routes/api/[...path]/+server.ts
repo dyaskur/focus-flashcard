@@ -119,9 +119,14 @@ export const POST = async ({ params, request, locals, cookies, url }) => {
   if (action === 'action') {
     const data = await parse(
       request,
-      z.object({ action: z.enum(['next', 'pause', 'resume', 'stop', 'hint']) })
+      z
+        .object({
+          action: z.enum(['next', 'pause', 'resume', 'stop', 'hint']),
+          questionId: z.string().min(1).max(100).optional()
+        })
+        .refine((value) => value.action !== 'hint' || !!value.questionId)
     );
-    return json(await sessionAction(user.id, id, data.action));
+    return json(await sessionAction(user.id, id, data.action, data.questionId));
   }
   if (action === 'correct') {
     await ownSession(user.id, id);

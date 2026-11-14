@@ -94,7 +94,13 @@ describe.runIf(!!process.env.TEST_DATABASE_URL)('PostgreSQL learning contract', 
       confidence: 0.2
     });
     expect(unclear.verdict).toBe('unclear');
-    await learning.sessionAction(userId, session.id, 'hint');
+    await expect(learning.sessionAction(userId, session.id, 'hint', q.id)).rejects.toMatchObject({
+      status: 409
+    });
+    expect(
+      (await learning.sessionDetails(userId, session.id)).session.hintedQuestionIds
+    ).not.toContain(second.id);
+    await learning.sessionAction(userId, session.id, 'hint', second.id);
     const retry = await learning.recordAttempt(userId, session.id, {
       ...input,
       eventId: randomUUID(),

@@ -131,7 +131,8 @@ export async function recordAttempt(
 export async function sessionAction(
   userId: string,
   sessionId: string,
-  action: 'next' | 'pause' | 'resume' | 'stop' | 'hint'
+  action: 'next' | 'pause' | 'resume' | 'stop' | 'hint',
+  questionId?: string
 ) {
   await ownSession(userId, sessionId);
   return db.transaction(async (tx) => {
@@ -140,6 +141,8 @@ export async function sessionAction(
       .from(learningSessions)
       .where(eq(learningSessions.id, sessionId))
       .for('update');
+    if (action === 'hint' && session.questionIds[session.cursor] !== questionId)
+      error(409, 'Pertanyaan sudah berganti.');
     if (['completed', 'stopped'].includes(session.status)) return session;
     let update: Partial<typeof learningSessions.$inferInsert>;
     if (action === 'next') {
