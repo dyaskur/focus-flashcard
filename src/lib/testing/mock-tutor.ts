@@ -10,7 +10,8 @@ export class MockTutor {
   async connect() {
     window.addEventListener('tutor:test-answer', this.answer);
   }
-  present(question: Question) {
+  present(question: Question, _options?: { readStory?: boolean }) {
+    void _options;
     this.question = question;
     this.paused = false;
     this.repeat();
@@ -19,11 +20,30 @@ export class MockTutor {
     clearTimeout(this.timer);
     this.callbacks.onStatus('speaking');
     this.timer = setTimeout(() => {
-      if (!this.paused) this.callbacks.onQuestionFinished();
+      if (!this.paused) {
+        if (this.callbacks.onControl) this.callbacks.onStatus('listening');
+        this.callbacks.onQuestionFinished();
+      }
     }, 80);
   }
   hint() {
     this.repeat();
+  }
+  review(_text: string) {
+    void _text;
+    this.playFeedback();
+  }
+  nudge(_stage: 1 | 2 | 3, _hint?: string) {
+    void _stage;
+    void _hint;
+    this.playFeedback();
+  }
+  private playFeedback() {
+    clearTimeout(this.timer);
+    this.callbacks.onStatus('speaking');
+    this.timer = setTimeout(() => {
+      if (!this.paused) this.callbacks.onStatus('listening');
+    }, 80);
   }
   pause() {
     this.paused = true;
@@ -52,6 +72,7 @@ export class MockTutor {
       },
       crypto.randomUUID()
     );
-    this.timer = setTimeout(() => this.callbacks.onQuestionFinished(), 50);
+    if (this.callbacks.onControl) this.playFeedback();
+    else this.timer = setTimeout(() => this.callbacks.onQuestionFinished(), 50);
   };
 }

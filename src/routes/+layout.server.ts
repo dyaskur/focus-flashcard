@@ -6,5 +6,6 @@ export const load = async ({ locals, cookies }) => ({
   children: locals.user
     ? await db.select().from(children).where(eq(children.userId, locals.user.id))
     : [],
-  activeChildId: cookies.get('child') ?? null
+  activeChildId: cookies.get('child') ?? null,
+  uiLanguage: cookies.get('uiLanguage') === 'en' ? ('en' as const) : ('id' as const)
 });

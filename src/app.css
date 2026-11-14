@@ -1898,3 +1898,227 @@ input::placeholder {
     width: 100px;
   }
 }
+
+/* Caregiver-owned flashcards: one story, an ordered question list, and a separate turn panel. */
+.interface-language {
+  width: 66px;
+  margin: 0;
+}
+.pilot h1 {
+  margin-top: 12px;
+}
+.pilot .muted,
+.pilot .fine-print {
+  color: #62715f;
+}
+.pilot .fine-print {
+  font-size: 12px;
+}
+.pilot-home-grid,
+.pilot-session-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.pilot-home-grid .form-card h2 {
+  margin: 0 0 10px;
+}
+.pilot-card-preview {
+  background: #edf1e4;
+  border: 1px solid #d8e1cf;
+  padding: 34px;
+  border-radius: 22px;
+  transform: rotate(1deg);
+}
+.pilot-card-preview h2 {
+  margin: 18px 0;
+}
+.preview-story {
+  padding: 20px 0;
+  border-block: 1px solid #d1dcc6;
+  line-height: 1.8;
+}
+.pilot-card-preview ol {
+  padding-left: 22px;
+  line-height: 2.3;
+}
+.pilot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.pilot-actions .chosen {
+  border-color: #2b5947;
+  background: #e3ecdb;
+}
+.pilot-notice {
+  background: #edf2e5;
+  border: 1px solid #d9e4cc;
+  border-radius: 12px;
+  padding: 17px;
+  margin-top: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.pilot-row-heading,
+.pilot-resume {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+}
+.pilot-resume {
+  margin-top: 15px;
+}
+.pilot-resume small {
+  display: block;
+  margin-top: 8px;
+}
+.pilot-session-grid {
+  margin-top: 24px;
+  grid-template-columns: 1.2fr 1fr;
+}
+.pilot-flashcard {
+  background: #fffefa;
+  border: 1px solid #d9e1d0;
+  border-top: 7px solid #80976c;
+  border-radius: 20px;
+  padding: 32px;
+  box-shadow: 0 8px 24px #334a3210;
+}
+.pilot-flashcard h1 {
+  font-size: 29px;
+  margin-top: 20px;
+}
+.pilot-story {
+  font-size: 19px;
+  line-height: 1.9;
+  margin-top: 22px;
+  padding-bottom: 25px;
+  border-bottom: 1px solid var(--line);
+}
+.pilot-question-list {
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+}
+.pilot-question-list li {
+  display: flex;
+  gap: 13px;
+  padding: 15px 12px;
+  margin: 7px 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #63745d;
+}
+.pilot-question-list li > span {
+  min-width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: #e9eedf;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+}
+.pilot-question-list li.current {
+  border-color: #9bad8d;
+  background: #f0f4e8;
+  color: #293e34;
+  font-weight: 600;
+}
+.pilot-question-list li.previous > span {
+  background: #2b5947;
+  color: white;
+}
+.pilot-turn {
+  padding: 26px;
+}
+.pilot-turn h2 {
+  font-size: 23px;
+  line-height: 1.5;
+  margin: 15px 0 0;
+}
+.pilot-reference {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.pilot-reference summary,
+.pilot-question-result summary {
+  cursor: pointer;
+  min-height: 44px;
+  font-size: 13px;
+}
+.pilot-reference p {
+  font-size: 13px;
+}
+.pilot-question-result {
+  border-top: 1px solid var(--line);
+  margin-top: 15px;
+  padding-top: 15px;
+}
+.pilot-question-result summary {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+}
+.pilot-question-result summary strong {
+  text-align: right;
+}
+.pilot-results {
+  margin-top: 24px;
+}
+.pilot-results > .history-row {
+  margin-top: 20px;
+}
+.pilot-voice {
+  background: #edf2e5;
+  border-radius: 12px;
+  margin-top: 20px;
+  padding: 17px;
+}
+.offline-banner {
+  color: #614c23;
+}
+@media (max-width: 760px) {
+  .pilot-home-grid,
+  .pilot-session-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .pilot-card-preview {
+    transform: none;
+  }
+  .pilot-flashcard,
+  .pilot-card-preview {
+    padding: 24px;
+  }
+  .pilot-row-heading {
+    flex-wrap: wrap;
+  }
+  .site-header {
+    gap: 10px;
+    height: auto;
+    min-height: 79px;
+    flex-wrap: wrap;
+    padding-block: 14px;
+  }
+  .header-actions {
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .interface-language {
+    min-width: 54px;
+    width: 54px;
+    padding-inline: 5px;
+  }
+  .pilot-story {
+    font-size: 17px;
+  }
+  .pilot .metric-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -8,6 +8,13 @@
       "when": 1794625386955,
       "tag": "0000_modern_radioactive_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794649580947,
+      "tag": "0001_peaceful_felicia_hardy",
+      "breakpoints": true
     }
   ]
 }

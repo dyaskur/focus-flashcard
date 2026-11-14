@@ -35,6 +35,17 @@ export const GET = async ({ params, locals }) => {
 export const POST = async ({ params, request, locals, cookies, url }) => {
   const user = requireUser(locals);
   const [resource, id, action] = params.path.split('/');
+  if (resource === 'preferences') {
+    const input = await parse(request, z.object({ uiLanguage: z.enum(['id', 'en']) }));
+    cookies.set('uiLanguage', input.uiLanguage, {
+      path: '/',
+      httpOnly: true,
+      secure: url.protocol === 'https:',
+      sameSite: 'lax',
+      maxAge: 365 * 86400
+    });
+    return json({ ok: true });
+  }
   if (resource === 'children' && uuid.safeParse(id).success) {
     await ownChild(user.id, id);
     const input = await parse(

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '$lib/server/db';
 import { children, learningSessions, answerAttempts } from '$lib/server/schema';
 import { calculateMetrics } from '$lib/analytics';
+import { history as pilotHistory } from '$lib/server/pilot';
 export const load = async ({ locals, url }) => {
   if (!locals.user) redirect(303, '/masuk');
   const filters = url.searchParams;
@@ -56,6 +57,12 @@ export const load = async ({ locals, url }) => {
       date: session.startedAt.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
     }));
   return {
+    practices: (await pilotHistory(locals.user.id)).map(({ session, child }) => ({
+      childName: child.name,
+      id: session.id,
+      childId: child.id,
+      ...session.state
+    })),
     metrics: calculateMetrics(rows, all.filter((r) => r.session.status === 'completed').length),
     history: all,
     attempts: attempts.filter((r) => sessionIds.has(r.session.id)).map((r) => r.attempt)

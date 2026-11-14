@@ -12,6 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { Question } from '../types';
+import type { PilotCard, PracticeSession } from '../pilot/types';
 
 export const users = pgTable('users', {
   id: uuid().primaryKey().defaultRandom(),
@@ -132,3 +133,22 @@ export const rateLimits = pgTable('rate_limits', {
   count: integer().notNull(),
   resetAt: timestamp({ withTimezone: true }).notNull()
 });
+
+// Legacy questions/sessions remain intact; pilot sessions keep the card version used in practice.
+// ponytail: one JSON snapshot under a row lock suits 1–5 pilot cards; normalize attempts if reporting volume grows.
+export const pilotCards = pgTable('pilot_cards', {
+  id: text().primaryKey(),
+  content: jsonb().$type<PilotCard>().notNull()
+});
+export const practiceSessions = pgTable(
+  'practice_sessions',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    childId: uuid()
+      .notNull()
+      .references(() => children.id, { onDelete: 'cascade' }),
+    state: jsonb().$type<Omit<PracticeSession, 'id' | 'childId'>>().notNull(),
+    startedAt: timestamp({ withTimezone: true }).notNull().defaultNow()
+  },
+  (t) => [index('practice_child_date_idx').on(t.childId, t.startedAt)]
+);

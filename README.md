@@ -1,10 +1,12 @@
 # Fokus, Dengar, dan Pikir
 
-Aplikasi latihan mendengar dan logika berbahasa Indonesia untuk anak usia 4–7 tahun, **selalu bersama orang tua atau pendamping**. Bukan alat diagnosis atau pengganti terapi.
+Aplikasi flashcard latihan menyimak dan logika untuk anak usia 4–7 tahun, **selalu bersama orang tua atau pendamping**. Anak dapat mendengar dan menjawab tanpa melihat HP; pendamping memegang layar. Bukan alat diagnosis atau pengganti terapi.
 
-Implementasi mencakup akun pendamping, beberapa profil anak, 200 soal, sesi lima soal, Gemini Live dua arah, petunjuk otomatis, koreksi pendamping, dashboard PostgreSQL, mode bebas distraksi, dan PWA.
+Pilot mencakup **20 kartu Indonesia–Inggris**, masing-masing 2–3 pertanyaan (50 pertanyaan per bahasa), level 1–2, mode pendamping nyata tanpa mikrofon, Gemini Live, pergantian mode dalam sesi, maksimal tiga percobaan yang bisa dinilai, histori/koreksi, serta laporan per bahasa, mode, kemampuan, dan bantuan. Bahasa UI pilot dapat dipilih terpisah dari bahasa latihan. Halaman akun/profil dan format lama masih memakai Indonesia.
 
-**Status verifikasi:** aplikasi, database, build, serta alur browser dengan adapter pengujian sudah dijalankan. Koneksi dan streaming audio Gemini nyata sudah diuji di Chromium dengan input mikrofon hening sintetis; percakapan dua arah serta perilaku mikrofon/speaker fisik **belum terverifikasi**. Production tidak mengganti Gemini dengan suara atau penilaian palsu.
+200 soal satu-pertanyaan dan histori awal tetap tersedia melalui tautan **format lama**; bukan otomatis bagian dari koleksi multi-pertanyaan pilot.
+
+**Status verifikasi:** tes unit, PostgreSQL lokal, serta alur browser pilot dengan adapter pengujian sudah dijalankan. Koneksi dan streaming audio Gemini nyata pada implementasi awal pernah diuji dengan input sintetis; percakapan pilot dua arah, pengenalan ucapan anak, perintah suara, kelanjutan kalimat yang terinterupsi, serta mikrofon/speaker fisik **belum terverifikasi**. Production tidak mengganti Gemini dengan suara atau penilaian palsu.
 
 ## Menjalankan secara lokal
 
@@ -31,9 +33,9 @@ npm run db:seed
 npm run dev
 ```
 
-Buka port 5173 pada mesin yang menjalankan aplikasi. Buat akun pendamping, tambahkan nama panggilan anak, lalu pilih kategori dan level. Nama pendamping, teman, hewan peliharaan, dan usia boleh kosong. Aplikasi memakai fallback nama yang natural.
+Buka port 5173 pada mesin yang menjalankan aplikasi. Buat akun pendamping, tambahkan nama panggilan anak, lalu pilih kategori, level, bahasa latihan, mode, dan jumlah kartu. Periksa susunan sesi sebelum mulai. Untuk mode pendamping, tekan **Mulai membacakan**; tidak memerlukan key Gemini atau mikrofon. Kedua mode tetap membutuhkan internet pada pilot. Nama pendamping, teman, hewan peliharaan, dan usia boleh kosong.
 
-Seed dapat dijalankan ulang: ID soal stabil dan menggunakan upsert. Distribusinya tepat 100 Mendengar dan 100 Logika, masing-masing 20 soal per level 1–5. Tidak ada akun bawaan atau data hasil belajar contoh.
+Seed dapat dijalankan ulang: ID stabil dan menggunakan upsert. Pilot: dua kategori × dua level × lima kartu, dengan versi bahasa berpasangan. Koleksi lama: 100 Mendengar dan 100 Logika, masing-masing 20 soal per level 1–5. Sesi pilot menyimpan snapshot kartu sehingga perubahan seed tidak mengubah cerita sesi yang sudah dimulai. Migration baru menambah tabel tanpa menghapus data lama. Tidak ada akun bawaan atau hasil belajar contoh.
 
 ## Mengaktifkan percakapan suara
 
@@ -42,7 +44,7 @@ Seed dapat dijalankan ulang: ID soal stabil dan menggunakan upsert. Distribusiny
 3. Masuk sebagai pendamping dan mulai sesi. Setujui pemrosesan suara oleh Google Gemini, lalu tekan **Aktifkan mikrofon & mulai** dan izinkan mikrofon browser.
 4. Gemini membacakan cerita dan pertanyaan. Jawab dengan suara. Pengulangan, lewati, jeda, lanjutkan, dan selesai tersedia di layar.
 
-Server menerbitkan token sekali pakai dengan batas waktu membuka sesi 60 detik dan masa token 30 menit. Model, instruksi, rubrik, dan fungsi `report_answer` dikunci oleh token; kunci utama tidak dikirim ke browser. Browser memakai WebSocket constrained v1beta langsung ke Gemini. Satu koneksi digunakan kembali untuk lima soal, dengan session resumption saat tersedia.
+Server menerbitkan token sekali pakai dengan batas waktu membuka sesi 60 detik dan masa token 30 menit. Model, instruksi, rubrik, `report_answer`, dan kontrol pilot dikunci oleh token; kunci utama tidak dikirim ke browser. Browser memakai WebSocket constrained v1beta langsung ke Gemini. Satu koneksi digunakan kembali antarpertanyaan, dengan session resumption saat tersedia. Pertanyaan berikutnya menunggu playback feedback selesai; pembahasan jawaban yang gagal ditunda sampai akhir kartu.
 
 Audio mikrofon di-resample dari sample rate perangkat menjadi PCM16 mono 16 kHz oleh AudioWorklet. Playback memakai antrean PCM16 24 kHz. VAD mikrofon menghentikan timer bantuan saat ucapan dimulai; interupsi membuang antrean suara AI. Resource dilepas saat sesi berakhir atau halaman ditinggalkan.
 
@@ -71,6 +73,18 @@ Database memiliki foreign key, indeks pemilik/tanggal, batas level, serta constr
 State sesi eksplisit memisahkan penyajian, menunggu jawaban, penilaian, feedback, jeda, reconnect, error, dan selesai. Timer bantuan tujuh detik dimulai setelah playback selesai, bukan saat AI mulai berbicara. Petunjuk memakai piktogram relevan dan deskripsi per soal; maskot SVG dibuat lokal. Ini bukan perpustakaan 200 ilustrasi SVG khusus.
 
 ## Definisi laporan
+
+### Pilot
+
+- Ringkasan sesi memisahkan berhasil tanpa bantuan tercatat, berhasil dengan bantuan, belum berhasil setelah tiga jawaban salah, belum jelas/belum selesai, dan dilewati. Diam serta ucapan tidak jelas bukan jawaban salah.
+- Cerita dapat diulang tanpa menghapus jawaban. Pengulangan dicatat di tingkat kartu dengan waktu; petunjuk, visual yang benar-benar dipakai, dan bantuan pendamping dicatat per pertanyaan. Bantuan pendamping dapat ditandai setelah sesi.
+- Dua jawaban tidak jelas berturut-turut menjeda latihan. Setelah tujuh detik diam, petunjuk dan ajakan pertama; lalu ajakan kedua, tawaran lewati, dan jeda bila tetap diam. Setiap tahap menunggu playback selesai. Lewati lewat suara membutuhkan konfirmasi.
+- Mode dicatat per percobaan. Laporan AI dan pendamping dipisahkan; akurasi memakai jawaban benar/salah pertama **yang dapat dinilai**, per pertanyaan dan mode, dengan jumlah sampel. Waktu manual tidak diukur. Tren menggunakan tanggal UTC; data sedikit bukan bukti tren kemampuan.
+- Filter bahasa, kategori, level, bantuan pada jawaban pertama yang dapat dinilai, dan pengalaman kartu membantu membandingkan konteks yang sebanding. Histori tetap menampilkan keseluruhan sesi campuran dan detail setiap percobaan.
+- Kartu dianggap pernah dilatih setelah semua pertanyaan ditangani, bukan karena semua jawaban benar. Pilihan belum-pernah dihitung per anak dan bahasa; kekurangan diisi kartu paling lama tidak dilatih, dengan peringatan sebelum mulai. Acak semua tidak memakai skor kelemahan dan tidak mengulang kartu dalam satu sesi. Replay menambah histori baru.
+- Koreksi mempertahankan nilai awal dan audit perubahan. Koreksi pada pertanyaan aktif memengaruhi langkah berikutnya; koreksi setelah lewat/selesai tidak memutar ulang sesi. Retry penulisan yang sama tidak menambah percobaan. Respons HTTP yang hilang direkonsiliasi dengan hasil tersimpan sebelum mengizinkan aksi berikutnya.
+
+### Format lama
 
 - **Akurasi:** soal benar pada percobaan pertama ÷ soal yang percobaan pertamanya dinilai benar/salah. Percobaan pertama yang belum jelas atau dilewati tidak masuk penyebut. Retry tidak menaikkan akurasi percobaan pertama.
 - **Waktu respons:** akhir pertanyaan diputar sampai aktivitas suara anak pertama kali terdeteksi. Pengulangan/jeda memulai batas waktu yang baru. Dashboard merata-ratakan waktu percobaan pertama yang tersedia, tidak memasukkan soal dilewati.
@@ -135,4 +149,8 @@ SvelteKit saat ini mengeluarkan peringatan deprecation untuk alias `$lib` dan pe
 - Kalibrasi usia/terapi dan play-testing 200 soal. Level tinggi ditujukan untuk ujung usia yang lebih tua dengan pendampingan.
 - Persetujuan hukum dan kebijakan data pihak ketiga untuk deployment tertentu.
 
-Pengembangan masih lokal; aplikasi belum di-push atau di-deploy.
+Implementasi awal berada di [PR #1](https://github.com/dyaskur/focus-flashcard/pull/1). Perubahan pilot dikerjakan pada branch yang sama; status push/merge harus diperiksa di Git. Belum di-deploy.
+
+## Sesudah pilot
+
+Mode pendamping offline harus menyediakan unduhan kartu, hasil lokal privat, dan sinkronisasi idempotent beserta penanganan konflik; AI tetap online. Roadmap lain: perluasan 200 kartu multi-pertanyaan/level 3–5, editor kartu pribadi, berbagi akses melalui undangan dan izin, serta bahasa tambahan. Tidak ada diagnosis, skor klinis, atau pemilihan adaptif berdasarkan kelemahan pada pilot.

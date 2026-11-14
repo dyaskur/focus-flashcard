@@ -361,7 +361,7 @@
       </div>
       <a class="button primary" href="/beranda">Petualangan baru<ArrowRight size={17} /></a><a
         class="button ghost"
-        href="/pendamping">Lihat bersama pendamping</a
+        href="/pendamping?legacy=1">Lihat bersama pendamping</a
       >
     </section>
   {:else}

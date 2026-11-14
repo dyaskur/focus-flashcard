@@ -16,6 +16,7 @@ async function register(page: Page) {
   await page.getByLabel('Usia').fill('5');
   await page.getByRole('button', { name: 'Simpan & mulai belajar' }).click();
   await expect(page).toHaveURL(/\/beranda/);
+  await page.goto('/beranda?legacy=1');
   return email;
 }
 async function answer(page: Page, data = {}) {
