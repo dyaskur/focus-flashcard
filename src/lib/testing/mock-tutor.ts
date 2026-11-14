@@ -9,6 +9,7 @@ export class MockTutor {
   constructor(private callbacks: LiveTutorCallbacks) {}
   async connect() {
     window.addEventListener('tutor:test-answer', this.answer);
+    window.addEventListener('tutor:test-error', this.error);
   }
   present(question: Question, _options?: { readStory?: boolean }) {
     void _options;
@@ -56,10 +57,12 @@ export class MockTutor {
   close() {
     this.pause();
     window.removeEventListener('tutor:test-answer', this.answer);
+    window.removeEventListener('tutor:test-error', this.error);
   }
+  private error = () => this.callbacks.onError('Test transport error');
   private answer = async (event: Event) => {
     if (!this.question || this.paused) return;
-    const data = (event as CustomEvent<Partial<AnswerEvent>>).detail;
+    const data = (event as CustomEvent<Partial<AnswerEvent> & { stallFeedback?: boolean }>).detail;
     this.callbacks.onSpeechStart();
     this.callbacks.onStatus('thinking');
     await this.callbacks.onAnswer(
@@ -72,6 +75,7 @@ export class MockTutor {
       },
       crypto.randomUUID()
     );
+    if (data.stallFeedback) return;
     if (this.callbacks.onControl) this.playFeedback();
     else this.timer = setTimeout(() => this.callbacks.onQuestionFinished(), 50);
   };

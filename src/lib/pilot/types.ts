@@ -29,6 +29,7 @@ export interface PracticeCard extends CardVersion {
   category: Category;
   level: number;
   language: Language;
+  completedAt?: string;
 }
 export interface PracticeAttempt {
   id: string;

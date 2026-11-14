@@ -1,7 +1,7 @@
 import { redirect } from '@sveltejs/kit';
-import { history } from '$lib/server/pilot';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { pilotCards } from '$lib/server/schema';
+import { pilotCards, practiceSessions } from '$lib/server/schema';
 export const load = async ({ parent }) => {
   const data = await parent();
   if (!data.user) redirect(303, '/masuk');
@@ -9,8 +9,18 @@ export const load = async ({ parent }) => {
   const child = data.children.find((c) => c.id === data.activeChildId) ?? data.children[0];
   return {
     cards: (await db.select().from(pilotCards)).map((r) => r.content),
-    sessions: (await history(data.user.id, child.id))
-      .slice(0, 20)
-      .map(({ session }) => ({ id: session.id, childId: child.id, ...session.state }))
+    sessions: (
+      await db
+        .select()
+        .from(practiceSessions)
+        .where(
+          and(
+            eq(practiceSessions.childId, child.id),
+            sql`${practiceSessions.state}->>'status' in ('active', 'paused')`
+          )
+        )
+        .orderBy(desc(practiceSessions.startedAt))
+        .limit(20)
+    ).map((session) => ({ id: session.id, childId: child.id, ...session.state }))
   };
 };

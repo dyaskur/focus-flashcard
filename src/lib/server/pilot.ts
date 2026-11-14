@@ -8,7 +8,13 @@ import { evaluateAnswer } from '../evaluation';
 import type { Category, ChildProfile, Verdict } from '../types';
 import type { Language, PilotCard, PracticeMode, PracticeSession } from '../pilot/types';
 import { questionDone } from '../pilot/types';
-import { attemptsFor, currentCard, currentQuestion, finishedCard } from '../pilot/session';
+import {
+  attemptsFor,
+  cardCompletedAt,
+  currentCard,
+  currentQuestion,
+  finishedCard
+} from '../pilot/session';
 
 export interface Selection {
   childId: string;
@@ -59,9 +65,7 @@ export function selectCards(
   for (const session of sessions.filter((s) => s.language === input.language)) {
     for (const card of session.cards)
       if (finishedCard(session, card.id)) {
-        const date =
-          session.attempts.filter((a) => a.cardId === card.id).at(-1)?.createdAt ??
-          session.startedAt;
+        const date = cardCompletedAt(session, card.id) ?? '';
         if (!last.has(card.id) || date > last.get(card.id)!) last.set(card.id, date);
       }
   }
@@ -200,6 +204,9 @@ export async function updatePractice(userId: string, id: string, input: Practice
     if (['completed', 'stopped'].includes(session.status) && !retrospective)
       error(409, 'Sesi tidak aktif / Session inactive.');
     const now = new Date().toISOString();
+    const completedBefore = new Set(
+      session.cards.filter((c) => finishedCard(session, c.id)).map((c) => c.id)
+    );
     const event = (type: (typeof session.events)[number]['type']) =>
       session.events.push({
         id: input.eventId,
@@ -303,6 +310,10 @@ export async function updatePractice(userId: string, id: string, input: Practice
             )
         );
       else event(input.action as 'hint' | 'visual' | 'caregiver' | 'repeat');
+    }
+    for (const practiced of session.cards) {
+      if (!finishedCard(session, practiced.id)) delete practiced.completedAt;
+      else if (!completedBefore.has(practiced.id)) practiced.completedAt = now;
     }
     (session.commandIds ??= []).push(input.eventId);
     const { id: _id, childId: _childId, ...state } = session;

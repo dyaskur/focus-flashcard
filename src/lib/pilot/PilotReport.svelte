@@ -2,7 +2,7 @@
   import { getContext } from 'svelte';
   import type { LearningStores } from '$lib/stores';
   import type { PracticeSession, PracticeMode } from './types';
-  import { results, assistanceFor, finishedCard } from './session';
+  import { results, assistanceFor, cardCompletedAt } from './session';
   import ProgressChart from '$lib/components/ProgressChart.svelte';
   import SessionResults from './SessionResults.svelte';
   let {
@@ -41,13 +41,16 @@
         const attempts = row.attempts.filter((a) => a.mode === mode);
         const first = attempts.find((a) => ['correct', 'incorrect'].includes(a.verdict));
         const assisted = first ? assistanceFor(session, first).length > 0 : false;
-        const repeated = sessions.some(
-          (s) =>
+        const repeated = sessions.some((s) => {
+          const completedAt = cardCompletedAt(s, row.card.id);
+          return (
+            s.id !== session.id &&
             s.childId === session.childId &&
             s.language === session.language &&
-            s.startedAt < session.startedAt &&
-            finishedCard(s, row.card.id)
-        );
+            completedAt !== null &&
+            completedAt < session.startedAt
+          );
+        });
         return first &&
           (!assistance || (assistance === 'yes') === assisted) &&
           (!experience || (experience === 'repeat') === repeated)

@@ -37,7 +37,23 @@ test('bilingual caregiver practice preserves attempts through pause, correction,
   await expect(page).toHaveURL(/\/latihan\//);
   const id = page.url().split('/').pop()!;
   await expect(page.getByTestId('pilot-question')).toHaveAttribute('lang', 'en');
-  await page.getByLabel('Bahasa antarmuka / Interface language').selectOption('en');
+  let releaseSave!: () => void;
+  const saveGate = new Promise<void>((resolve) => {
+    releaseSave = resolve;
+  });
+  await page.route('**/api/preferences', async (route) => {
+    await saveGate;
+    await route.continue();
+  });
+  const languageSelect = page.getByLabel('Bahasa antarmuka / Interface language');
+  await languageSelect.selectOption('en');
+  await expect(languageSelect).toBeDisabled();
+  releaseSave();
+  await expect(languageSelect).toBeEnabled();
+  await page.unroute('**/api/preferences');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await page.getByRole('button', { name: 'Start reading', exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await snapshot(page, 'pilot-manual-mobile');
@@ -180,4 +196,102 @@ test('silence gives two invitations and a skip offer, then pauses without a wron
   expect(saved.attempts).toEqual([]);
   expect(saved.events.filter((e: { type: string }) => e.type === 'hint')).toHaveLength(1);
   expect(saved.status).toBe('paused');
+});
+
+test('paused mode switches require consent, errors stop the tutor, and stalled feedback can recover', async ({
+  page
+}) => {
+  await register(page);
+  await page.getByRole('button', { name: /^Mulai sesi/ }).click();
+  await page.getByRole('button', { name: 'Mulai membacakan' }).click();
+  await page.getByRole('button', { name: 'Jeda', exact: true }).click();
+  await page.getByLabel('Ganti mode · progres tetap tersimpan').selectOption('ai');
+  let tokens = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('/token')) tokens++;
+  });
+  const consent = page.getByLabel('Saya mendampingi dan mengizinkan pemrosesan suara oleh Gemini.');
+  await expect(consent).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Lanjutkan sesi', exact: true })).toBeDisabled();
+  expect(tokens).toBe(0);
+  await snapshot(page, 'pilot-paused-ai-consent');
+  await consent.check();
+  await page.getByRole('button', { name: 'Lanjutkan sesi', exact: true }).click();
+  await expect(page.getByText('Mendengarkan jawaban.', { exact: true })).toBeVisible();
+  expect(tokens).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event('tutor:test-error')));
+  await expect(page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' })).toBeVisible();
+  const id = page.url().split('/').pop()!;
+  await page.evaluate(() =>
+    window.dispatchEvent(new CustomEvent('tutor:test-answer', { detail: {} }))
+  );
+  await page.request.get(`/api/pilot/${id}`);
+  expect((await (await page.request.get(`/api/pilot/${id}`)).json()).attempts).toEqual([]);
+  await page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' }).click();
+  await expect(page.getByText('Mendengarkan jawaban.', { exact: true })).toBeVisible();
+  await page.evaluate(() =>
+    window.dispatchEvent(new CustomEvent('tutor:test-answer', { detail: { stallFeedback: true } }))
+  );
+  const recovery = page.getByRole('button', { name: /^Lanjutkan bila audio terhenti/ });
+  await expect(recovery).toBeEnabled();
+  await snapshot(page, 'pilot-stalled-feedback-recovery');
+  await recovery.click();
+  await expect(page.getByText('PERTANYAAN 2/2', { exact: false })).toBeVisible();
+  expect((await (await page.request.get(`/api/pilot/${id}`)).json()).attempts).toHaveLength(1);
+});
+
+test('report uses card completion before session start, not an overlapping session start', async ({
+  page
+}) => {
+  await register(page);
+  await page.getByRole('button', { name: /^Mulai sesi/ }).click();
+  await expect(page).toHaveURL(/\/latihan\//);
+  const first = await (await page.request.get(`/api/pilot/${page.url().split('/').pop()}`)).json();
+  const selection = {
+    childId: first.childId,
+    category: first.category,
+    level: first.level,
+    language: first.language,
+    mode: 'manual',
+    count: 1,
+    selection: 'random',
+    replayCardId: first.cards[0].id,
+    confirmed: true
+  };
+  const headers = { Origin: 'http://localhost:5174' };
+  const second = await (
+    await page.request.post('/api/pilot/sessions', { headers, data: selection })
+  ).json();
+  const finish = async (session: typeof first) => {
+    for (const card of session.cards)
+      for (const question of card.questions) {
+        for (const action of ['answer', 'next']) {
+          const response = await page.request.post(`/api/pilot/${session.id}/action`, {
+            headers,
+            data: {
+              action,
+              eventId: randomUUID(),
+              cardId: card.id,
+              questionId: question.id,
+              mode: 'manual',
+              verdict: 'correct'
+            }
+          });
+          expect(response.ok()).toBe(true);
+        }
+      }
+  };
+  // The first session began earlier but completed only after the second started.
+  await finish(first);
+  await finish(second);
+  const third = await (
+    await page.request.post('/api/pilot/sessions', { headers, data: selection })
+  ).json();
+  await finish(third);
+  await page.goto('/pendamping');
+  await page.getByLabel('Pengalaman kartu · bahasa ini').selectOption('repeat');
+  await expect(page.locator('.metric-card').first().locator('strong')).toHaveText('2');
+  await page.getByLabel('Pengalaman kartu · bahasa ini').selectOption('new');
+  // The initial default session has three cards; second has one: eight questions.
+  await expect(page.locator('.metric-card').first().locator('strong')).toHaveText('8');
 });

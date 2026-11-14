@@ -20,6 +20,7 @@
   let online = $state(true);
   let mounted = $state(false);
   let savingPreference = $state(false);
+  let savingLanguage = $state(false);
   const inSession = $derived(/^\/(belajar|latihan)\//.test(page.url.pathname));
   $effect(() => {
     profile.set(activeChild);
@@ -27,6 +28,9 @@
   });
   $effect(() => {
     document.documentElement.classList.toggle('sensory', $sensoryMode);
+  });
+  $effect(() => {
+    document.documentElement.lang = $uiLanguage;
   });
   onMount(() => {
     mounted = true;
@@ -64,13 +68,18 @@
     }
   }
   async function changeLanguage(event: Event) {
-    const next = (event.target as HTMLSelectElement).value as 'id' | 'en';
+    if (savingLanguage) return;
+    const select = event.target as HTMLSelectElement;
+    const next = select.value as 'id' | 'en';
+    savingLanguage = true;
     try {
       if (data.user) await api('preferences', { uiLanguage: next });
       uiLanguage.set(next);
-      document.documentElement.lang = next;
     } catch (e) {
+      select.value = $uiLanguage;
       modeError = (e as Error).message;
+    } finally {
+      savingLanguage = false;
     }
   }
 </script>
@@ -106,6 +115,7 @@
       aria-label="Bahasa antarmuka / Interface language"
       class="interface-language"
       value={$uiLanguage}
+      disabled={savingLanguage}
       onchange={changeLanguage}><option value="id">ID</option><option value="en">EN</option></select
     >
     {#if data.children.length > 1 && !inSession}<select

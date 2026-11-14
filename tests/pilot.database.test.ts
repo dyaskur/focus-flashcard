@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { db as Database } from '../src/lib/server/db';
 import * as tables from '../src/lib/server/schema';
 import { pilotCards } from '../src/lib/pilot/cards';
-import { finishedCard, assistanceFor } from '../src/lib/pilot/session';
+import { finishedCard, assistanceFor, results } from '../src/lib/pilot/session';
 import type { PracticeSession } from '../src/lib/pilot/types';
 
 describe.runIf(!!process.env.TEST_DATABASE_URL)('Pilot persistence contract', () => {
@@ -136,6 +136,8 @@ describe.runIf(!!process.env.TEST_DATABASE_URL)('Pilot persistence contract', ()
       session.attempts.slice(0, 5).every((a) => a.mode === 'manual' && a.responseTimeMs === null)
     ).toBe(true);
     expect(finishedCard(session, card.id)).toBe(true);
+    const completedAt = session.cards[0].completedAt;
+    expect(completedAt).toBe(session.attempts.at(-1)?.createdAt);
     await act('next');
     expect(session.status).toBe('completed');
     expect(JSON.stringify(session)).not.toContain('answerText');
@@ -157,6 +159,8 @@ describe.runIf(!!process.env.TEST_DATABASE_URL)('Pilot persistence contract', ()
     });
     expect(session.status).toBe('completed');
     expect(finishedCard(session, card.id)).toBe(true);
+    expect(session.cards[0].completedAt).toBe(completedAt);
+    expect(results(session).find((r) => r.question.id === question.id)?.status).toBe('incorrect');
     session = await pilot.updatePractice(userId, session.id, {
       action: 'caregiver',
       eventId: randomUUID(),
@@ -173,6 +177,91 @@ describe.runIf(!!process.env.TEST_DATABASE_URL)('Pilot persistence contract', ()
     expect(replay.attempts).toEqual([]);
     expect((await pilot.practiceDetails(userId, session.id)).attempts).toHaveLength(6);
     expect(await db.select().from(tables.questions)).toHaveLength(200);
+  });
+  it('clears premature completion when a correction reopens the current question', async () => {
+    let session = await pilot.createPractice(
+      userId,
+      {
+        childId,
+        category: 'logika',
+        level: 1,
+        language: 'id',
+        mode: 'manual',
+        count: 1,
+        selection: 'random'
+      },
+      true
+    );
+    const card = session.cards[0];
+    const act = async (questionId: string, action: 'answer' | 'next' | 'correct', extra = {}) => {
+      session = await pilot.updatePractice(userId, session.id, {
+        action,
+        questionId,
+        cardId: card.id,
+        eventId: randomUUID(),
+        mode: 'manual',
+        ...extra
+      });
+    };
+    await act(card.questions[0].id, 'answer', { verdict: 'correct' });
+    await act(card.questions[0].id, 'next');
+    await act(card.questions[1].id, 'answer', { verdict: 'correct' });
+    expect(session.cards[0].completedAt).toBeDefined();
+    await act(card.questions[1].id, 'correct', {
+      attemptId: session.attempts.at(-1)!.id,
+      verdict: 'incorrect'
+    });
+    expect(finishedCard(session, card.id)).toBe(false);
+    expect(session.cards[0].completedAt).toBeUndefined();
+    await act(card.questions[1].id, 'answer', { verdict: 'correct' });
+    expect(session.cards[0].completedAt).toBe(session.attempts.at(-1)!.createdAt);
+  });
+  it('loads the latest 20 resumable sessions without completed history displacing them', async () => {
+    const [child] = await db
+      .insert(tables.children)
+      .values({ userId, name: 'History' })
+      .returning();
+    const source = await pilot.createPractice(
+      userId,
+      {
+        childId: child.id,
+        category: 'mendengar',
+        level: 1,
+        language: 'id',
+        mode: 'manual',
+        count: 1,
+        selection: 'random'
+      },
+      true
+    );
+    await db.delete(tables.practiceSessions).where(eq(tables.practiceSessions.id, source.id));
+    const { id: _id, childId: _childId, ...state } = source;
+    void _id;
+    void _childId;
+    const saved = await db
+      .insert(tables.practiceSessions)
+      .values(
+        Array.from({ length: 44 }, (_, i) => ({
+          childId: child.id,
+          startedAt: new Date(Date.UTC(2026, 0, i + 1)),
+          state: {
+            ...state,
+            status: i < 22 ? (i % 2 ? 'active' : 'paused') : 'completed'
+          } as typeof state
+        }))
+      )
+      .returning();
+    const { load } = await import('../src/routes/beranda/+page.server');
+    const home = await load({
+      parent: async () => ({ user: { id: userId }, children: [child], activeChildId: child.id })
+    } as unknown as Parameters<typeof load>[0]);
+    expect(home.sessions.map((s) => s.id)).toEqual(
+      saved
+        .slice(2, 22)
+        .reverse()
+        .map((s) => s.id)
+    );
+    expect(await pilot.history(userId, child.id)).toHaveLength(44);
   });
   it('selects unseen per language, includes partial cards, fills oldest first, and leaves random independent of results', async () => {
     const cards = pilotCards.filter((c) => c.category === 'mendengar' && c.level === 1);

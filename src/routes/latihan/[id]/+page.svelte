@@ -201,11 +201,13 @@
       message = error;
       clearTimer();
       pendingPlayback = null;
+      tutor?.close();
+      tutor = undefined;
       started = false;
     }
   };
   async function connect() {
-    if (busy || disposed) return;
+    if (busy || disposed || !consent) return;
     busy = true;
     message = '';
     try {
@@ -301,6 +303,7 @@
     started = false;
   }
   async function resume() {
+    if (session.mode === 'ai' && !consent) return;
     await command('resume');
     if (session.mode === 'ai') {
       tutor?.close();
@@ -415,6 +418,12 @@
         {#if testMode}<p class="test-banner">
             TEST ADAPTER · {t('bukan Gemini nyata', 'not real Gemini')}
           </p>{/if}
+        {#if session.mode === 'ai' && !started}<label class="checkbox-label mt-4"
+            ><input type="checkbox" bind:checked={consent} />{t(
+              'Saya mendampingi dan mengizinkan pemrosesan suara oleh Gemini.',
+              'I am supervising and permit Gemini to process the audio.'
+            )}</label
+          >{/if}
         {#if session.status === 'paused'}<div class="pilot-notice">
             <h3>{t('Latihan dijeda.', 'Practice paused.')}</h3>
             <p>
@@ -423,8 +432,10 @@
                 'The caregiver can help, resume, or switch modes. The current story will be reread.'
               )}
             </p>
-            <button class="button primary mt-4" disabled={busy} onclick={() => run(resume)}
-              >{t('Lanjutkan sesi', 'Resume session')}</button
+            <button
+              class="button primary mt-4"
+              disabled={busy || (session.mode === 'ai' && !consent)}
+              onclick={() => run(resume)}>{t('Lanjutkan sesi', 'Resume session')}</button
             >
           </div>
         {:else if !started}<div class="pilot-notice">
@@ -439,12 +450,7 @@
                     'AI reads and asks. The child can answer by voice.'
                   )}
             </p>
-            {#if session.mode === 'ai'}<label class="checkbox-label mt-4"
-                ><input type="checkbox" bind:checked={consent} />{t(
-                  'Saya mendampingi dan mengizinkan pemrosesan suara oleh Gemini.',
-                  'I am supervising and permit Gemini to process the audio.'
-                )}</label
-              ><button
+            {#if session.mode === 'ai'}<button
                 class="button primary"
                 disabled={busy || !consent}
                 onclick={() => run(connect)}
@@ -502,8 +508,12 @@
                 >{/if}
             </div>{:else if done}<button
               class="button primary full mt-5"
-              disabled={busy || !!pendingPlayback}
-              onclick={() => run(() => advance())}
+              disabled={busy}
+              onclick={() =>
+                run(() => {
+                  pendingPlayback = null;
+                  return advance();
+                })}
               >{session.mode === 'manual'
                 ? t('Lanjutkan', 'Continue')
                 : t('Lanjutkan bila audio terhenti', 'Continue if audio stalled')} →</button

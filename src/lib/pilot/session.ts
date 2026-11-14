@@ -21,6 +21,19 @@ export function finishedCard(session: PracticeSession, cardId: string) {
     )
   );
 }
+export function cardCompletedAt(session: PracticeSession, cardId: string) {
+  if (!finishedCard(session, cardId)) return null;
+  const recorded = session.cards.find((c) => c.id === cardId)?.completedAt;
+  if (recorded) return recorded;
+  // Legacy snapshots: use the latest evidence, never the session's start time.
+  return (
+    session.attempts
+      .filter((a) => a.cardId === cardId)
+      .map((a) => a.correctedAt ?? a.createdAt)
+      .sort()
+      .at(-1) ?? null
+  );
+}
 export function assistanceFor(session: PracticeSession, attempt: PracticeAttempt) {
   return session.events.filter(
     (event) =>
@@ -42,7 +55,8 @@ export function results(session: PracticeSession) {
         ? 'correct'
         : last?.verdict === 'skipped'
           ? 'skipped'
-          : attempts.filter((a) => a.verdict === 'incorrect').length >= 3
+          : attempts.filter((a) => a.verdict === 'incorrect').length >= 3 ||
+              (last?.verdict === 'incorrect' && session.resolvedQuestionIds?.includes(question.id))
             ? 'incorrect'
             : last?.verdict === 'unclear'
               ? 'unclear'
