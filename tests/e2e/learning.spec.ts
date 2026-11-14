@@ -319,6 +319,46 @@ test('legacy answer saves block skipping and obsolete pending answers do not blo
   await expect(page.getByRole('button', { name: 'Cerita berikutnya' })).toBeEnabled();
 });
 
+for (const completeOnServer of [false, true]) {
+  test(`legacy reconnect restores committed answers after lost responses (completed=${completeOnServer})`, async ({
+    page
+  }) => {
+    await register(page);
+    await page.getByRole('button', { name: 'Mulai petualangan' }).click();
+    await expect(page).toHaveURL(/\/belajar\//);
+    const id = page.url().split('/').pop()!;
+    await page.getByRole('checkbox').check();
+    await page.getByRole('button', { name: 'Aktifkan mikrofon & mulai' }).click();
+    for (let i = 1; i <= 5; i++) {
+      await expect(page.getByText('Aku mendengarkan. Jawab dengan suaramu.')).toBeVisible();
+      await page.route(`**/api/sessions/${id}/attempts`, async (route) => {
+        const response = await route.fetch();
+        expect(response.ok()).toBe(true);
+        if (completeOnServer && i === 5) {
+          const advanced = await page.request.post(`/api/sessions/${id}/action`, {
+            headers: { Origin: 'http://localhost:5174' },
+            data: { action: 'next' }
+          });
+          expect(advanced.ok()).toBe(true);
+        }
+        await route.abort('failed');
+      });
+      await answer(page);
+      await expect(page.getByRole('heading', { name: 'Kita coba sambungkan lagi.' })).toBeVisible();
+      await page.unroute(`**/api/sessions/${id}/attempts`);
+      await page.getByRole('button', { name: 'Sambungkan kembali', exact: true }).click();
+      if (!(completeOnServer && i === 5)) {
+        await expect(page.getByText('Jawabanmu sudah tersimpan. Yuk, lanjutkan.')).toBeVisible();
+        await page.getByRole('button', { name: 'Cerita berikutnya' }).click();
+      }
+    }
+    await expect(page.getByRole('heading', { name: 'Kamu sudah berusaha hebat!' })).toBeVisible();
+    await expect(page.locator('.completion-stats strong')).toHaveText(['5', '5', '0']);
+    const saved = await (await page.request.get(`/api/sessions/${id}`)).json();
+    expect(saved.attempts).toHaveLength(5);
+  });
+}
+
 test('legacy leaving during delayed session refresh cannot open a tutor afterward', async ({
   page
 }) => {

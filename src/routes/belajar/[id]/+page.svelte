@@ -195,6 +195,13 @@
       if (!freshResponse.ok) throw new Error('Sesi tidak dapat dimuat.');
       const fresh = await freshResponse.json();
       if (disposed) return;
+      attempts = fresh.attempts.map(
+        (a: { questionId: string; verdict: Verdict; hintUsed: boolean }) => ({
+          questionId: a.questionId,
+          verdict: a.verdict,
+          hintUsed: a.hintUsed
+        })
+      );
       if (['completed', 'stopped'].includes(fresh.session.status)) {
         move('presenting');
         move('next_question');
