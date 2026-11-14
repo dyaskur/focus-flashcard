@@ -529,6 +529,78 @@ describe('native Live session lifecycle and audio events', () => {
 });
 
 describe('pilot Live contract', () => {
+  it.each(['nudge-nudge', 'hint-hint', 'nudge-hint', 'hint-nudge'])(
+    'restores completed-question readiness after overlapping %s playback',
+    async (sequence) => {
+      tutor = new LiveTutor(events, { pilot: true });
+      const socket = await connected();
+      socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+      FakeContext.instances[0].sources.at(-1)!.end();
+      for (const action of sequence.split('-')) {
+        if (action === 'hint') tutor.hint();
+        else tutor.nudge(3);
+        socket.message({ serverContent: { modelTurn: { parts: [audio] } } });
+      }
+      socket.message({ toolCall: { functionCalls: [{ ...tool, id: 'during-prompt' }] } });
+      await flush();
+      expect(events.onAnswer).not.toHaveBeenCalled();
+      expect(JSON.stringify(socket.sent.at(-1))).toContain('question_not_finished');
+      socket.message({ serverContent: { turnComplete: true } });
+      FakeContext.instances[0].sources.at(-1)!.end();
+      socket.message({ toolCall: { functionCalls: [tool] } });
+      await flush();
+      expect(events.onAnswer).toHaveBeenCalledTimes(1);
+      expect(events.onQuestionFinished).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each([1, 2, 3] as const)(
+    'continues an unfinished story after stage %s nudge without counting the offer as completion',
+    async (stage) => {
+      tutor = new LiveTutor(events, { pilot: true });
+      const socket = await connected();
+      socket.message({ serverContent: { modelTurn: { parts: [audio] } } });
+      tutor.nudge(stage);
+      socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+      FakeContext.instances[0].sources.at(-1)!.end();
+      expect(events.onQuestionFinished).not.toHaveBeenCalled();
+      expect(JSON.stringify(socket.sent.at(-1))).toContain('APP_CONTINUE');
+      socket.message({ toolCall: { functionCalls: [{ ...tool, id: 'before-continuation' }] } });
+      await flush();
+      expect(events.onAnswer).not.toHaveBeenCalled();
+      expect(JSON.stringify(socket.sent.at(-1))).toContain('question_not_finished');
+      socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+      FakeContext.instances[0].sources.at(-1)!.end();
+      expect(events.onQuestionFinished).toHaveBeenCalledTimes(1);
+      socket.message({ toolCall: { functionCalls: [tool] } });
+      await flush();
+      expect(events.onAnswer).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(['present', 'repeat', 'review'] as const)(
+    '%s invalidates readiness saved by a replaced hint',
+    async (transition) => {
+      tutor = new LiveTutor(events, { pilot: true });
+      const socket = await connected();
+      socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+      FakeContext.instances[0].sources.at(-1)!.end();
+      tutor.hint();
+      if (transition === 'present') tutor.present(question);
+      else if (transition === 'repeat') tutor.repeat();
+      else tutor.review('App-authorized explanation.');
+      tutor.nudge(3);
+      tutor.hint();
+      socket.message({ serverContent: { modelTurn: { parts: [audio] }, turnComplete: true } });
+      FakeContext.instances[0].sources.at(-1)!.end();
+      expect(events.onQuestionFinished).toHaveBeenCalledTimes(1);
+      socket.message({ toolCall: { functionCalls: [tool] } });
+      await flush();
+      expect(events.onAnswer).not.toHaveBeenCalled();
+      expect(JSON.stringify(socket.sent.at(-1))).toContain('question_not_finished');
+    }
+  );
+
   it.each(['repeat', 'hint', 'pause', 'request_skip', 'confirm_skip'])(
     'dispatches %s only to the app, never answer persistence',
     async (action) => {

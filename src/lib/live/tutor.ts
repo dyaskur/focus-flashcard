@@ -177,11 +177,12 @@ export class LiveTutor {
 
   private speak(action: string, data: Record<string, unknown>): void {
     if (!this.ready || this.paused) return;
-    this.restoreAnswers = action === 'APP_NUDGE' && this.answersReady;
+    this.restoreAnswers = action === 'APP_NUDGE' && (this.answersReady || this.restoreAnswers);
     this.answersReady = false;
     this.commandVersion++;
-    this.questionPending = false;
-    this.hintPlaying = false;
+    this.hintPlaying = this.pilot && action === 'APP_NUDGE';
+    // Nudges, like hints, must return to an unfinished question after playback.
+    if (!this.hintPlaying) this.questionPending = false;
     this.clearPlayback();
     this.setStatus('thinking');
     try {
@@ -242,7 +243,7 @@ export class LiveTutor {
     if (!this.ready || !this.question) throw new Error('Sesi suara belum tersambung.');
     this.commandVersion++;
     this.hintPlaying = this.pilot && action === 'APP_HINT';
-    this.restoreAnswers = this.hintPlaying && this.answersReady;
+    this.restoreAnswers = this.hintPlaying && (this.answersReady || this.restoreAnswers);
     if (this.pilot) this.answersReady = false;
     if (!this.hintPlaying) {
       this.questionPending = true;
