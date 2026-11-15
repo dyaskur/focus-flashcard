@@ -1,0 +1,12 @@
+*
+!.gcloudignore
+!.dockerignore
+!Dockerfile
+!package.json
+!package-lock.json
+!tsconfig.json
+!vite.config.ts
+!src/
+!src/**
+!static/
+!static/**
