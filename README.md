@@ -138,6 +138,33 @@ NODE_ENV=production HOST=0.0.0.0 PORT=3000 ORIGIN=https://contoh.domain npm star
 
 Sediakan `DATABASE_URL`, `GEMINI_API_KEY`, `GEMINI_LIVE_MODEL`, dan `ORIGIN` di lingkungan hosting. Terapkan migration dan seed sebelum membuka layanan. Gunakan reverse proxy HTTPS, koneksi PostgreSQL yang aman, backup, dan pengawasan kuota Google. Jalankan pada root domain; AudioWorklet memakai `/audio-worklet.js`.
 
+### Pilot Cloud Run
+
+Pilot tersedia di https://focus-flashcard-276470419218.us-central1.run.app, project `yaskurweb`, region `us-central1`. Database khusus `focus_flashcard` memakai CockroachDB dengan TLS terverifikasi; lima tes integrasi database aplikasi lulus, termasuk penyimpanan bersamaan dan idempotency. Ini bukan klaim kompatibilitas seluruh fitur PostgreSQL atau bukti uji beban.
+
+`Dockerfile` membangun aplikasi dengan Node.js 24 lalu menjalankan hasil adapter Node sebagai pengguna non-root, tanpa dev dependencies. `.gcloudignore` dan `.dockerignore` memakai allowlist: `.env`, kredensial, `.git`, serta direktori kerja lokal tidak dikirim ke build. Migrasi dan seed dijalankan terpisah, bukan pada setiap startup container.
+
+Runtime memakai service account `focus-flashcard@yaskurweb.iam.gserviceaccount.com` dengan akses hanya ke dua secret aplikasi: `focus-flashcard-database-url` dan `focus-flashcard-gemini-api-key`. Secret koneksi memakai akun database khusus dengan izin SELECT/INSERT/UPDATE/DELETE pada tabel publik database flashcard, bukan akun administrasi. Jangan menaruh nilai secret dalam perintah deployment, image, atau Git.
+
+Untuk membangun dan deploy revisi berikutnya, pilih tag baru dan pastikan verifikasi lokal lulus:
+
+```sh
+TAG=release-YYYYMMDD-N
+IMAGE=us-central1-docker.pkg.dev/yaskurweb/focus-flashcard/app:$TAG
+gcloud builds submit --project=yaskurweb --region=us-central1 --tag="$IMAGE"
+gcloud run deploy focus-flashcard \
+  --project=yaskurweb --region=us-central1 --image="$IMAGE" \
+  --service-account=focus-flashcard@yaskurweb.iam.gserviceaccount.com \
+  --set-secrets=DATABASE_URL=focus-flashcard-database-url:1,GEMINI_API_KEY=focus-flashcard-gemini-api-key:1 \
+  --set-env-vars=ORIGIN=https://focus-flashcard-276470419218.us-central1.run.app,GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview,ADDRESS_HEADER=X-Forwarded-For,XFF_DEPTH=1 \
+  --port=8080 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=1 \
+  --concurrency=10 --timeout=60 --allow-unauthenticated
+```
+
+Versi secret dipin ke `1`; ketika rotasi, ubah nomor versi deployment secara eksplisit. Batas awal adalah satu instance dan skala ke nol saat tidak digunakan; cold start tetap mungkin dan layanan pendukung tidak otomatis gratis. Jangan menaikkan batas instance tanpa meninjau kuota koneksi database. Gemini memakai WebSocket langsung dari browser, bukan melalui server Cloud Run.
+
+Smoke test HTTPS mencakup pendaftaran/profil, kartu manual sampai selesai, hasil setelah reload, cookie Secure/HttpOnly, dan penerbitan token Gemini asli. Akun uji dibersihkan sesudahnya. Percakapan pilot dua arah dan mikrofon/speaker fisik masih harus diuji oleh pendamping.
+
 Manifest dan service worker mendukung pemasangan pada browser yang memenuhi syarat. Service worker menyimpan aset statis dan halaman fallback offline, bukan halaman akun atau data anak. UI fallback memberi tahu bahwa suara memerlukan internet. Ini **bukan** mode Gemini offline. Pemasangan fisik pada iOS/Android belum diuji.
 
 SvelteKit saat ini mengeluarkan peringatan deprecation untuk alias `$lib` dan peringatan konfigurasi service-worker terkait ekstensi `.json`; type checking, dev server, build service worker, dan pemeriksaan offline tetap berhasil. Ekstensi eksplisit dipakai agar resolver Vite dapat memuat konfigurasi dengan benar.
@@ -149,7 +176,7 @@ SvelteKit saat ini mengeluarkan peringatan deprecation untuk alias `$lib` dan pe
 - Kalibrasi usia/terapi dan play-testing 200 soal. Level tinggi ditujukan untuk ujung usia yang lebih tua dengan pendampingan.
 - Persetujuan hukum dan kebijakan data pihak ketiga untuk deployment tertentu.
 
-Implementasi awal berada di [PR #1](https://github.com/dyaskur/focus-flashcard/pull/1). Perubahan pilot dikerjakan pada branch yang sama; status push/merge harus diperiksa di Git. Belum di-deploy.
+Implementasi awal dan pilot di [PR #1](https://github.com/dyaskur/focus-flashcard/pull/1) sudah di-merge. Pilot telah di-deploy ke Cloud Run; lihat konfigurasi dan batas verifikasi di bagian deployment di atas.
 
 ## Sesudah pilot
 
